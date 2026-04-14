@@ -595,6 +595,18 @@ def has_any_user():
     return row["total"] > 0
 
 
+def has_active_admin():
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT COUNT(*) AS total
+        FROM users
+        WHERE role = 'admin' AND is_active = 1
+        """
+    ).fetchone()
+    return row["total"] > 0
+
+
 def fetch_companies(include_inactive=False):
     db = get_db()
     sql = "SELECT id, name, is_active FROM companies"
@@ -965,7 +977,7 @@ def validate_email(email):
 
 @app.route("/")
 def home():
-    if not has_any_user():
+    if not has_active_admin():
         return redirect(url_for("setup_admin"))
     if current_user():
         return redirect(url_for("dashboard"))
@@ -974,7 +986,7 @@ def home():
 
 @app.route("/setup-admin", methods=["GET", "POST"])
 def setup_admin():
-    if has_any_user():
+    if has_active_admin():
         return redirect(url_for("login"))
 
     if request.method == "POST":
@@ -1013,7 +1025,7 @@ def setup_admin():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if not has_any_user():
+    if not has_active_admin():
         return redirect(url_for("setup_admin"))
     if current_user():
         return redirect(url_for("dashboard"))
