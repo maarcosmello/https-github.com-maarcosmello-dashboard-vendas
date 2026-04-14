@@ -12,6 +12,17 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="action" value="create">
       <label>Nome da empresa<input type="text" name="name" required></label>
+      {% if show_owner_selector %}
+      <label>
+        Comunidade
+        <select name="owner_admin_id" required>
+          <option value="">Selecione</option>
+          {% for admin in community_admins %}
+          <option value="{{ admin.id }}">{{ admin.full_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
       <button class="btn btn-primary" type="submit">Salvar empresa</button>
     </form>
   </article>
@@ -20,11 +31,12 @@
     <h2>Empresas cadastradas</h2>
     <div class="table-wrapper">
       <table>
-        <thead><tr><th>Empresa</th><th>Status</th><th>Acoes</th></tr></thead>
+        <thead><tr><th>Empresa</th><th>Comunidade</th><th>Status</th><th>Ações</th></tr></thead>
         <tbody>
           {% for company in companies %}
           <tr>
             <td>{{ company.name }}</td>
+            <td>{{ company.owner_admin_name or '-' }}</td>
             <td>{{ 'Ativa' if company.is_active else 'Inativa' }}</td>
             <td>
               <div class="row-actions">

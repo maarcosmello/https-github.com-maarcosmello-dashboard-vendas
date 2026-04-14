@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}Funcionalidades Mestre | Comissionamento{% endblock %}
+
+{% block content %}
+<section class="layout">
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Painel do Administrador Mestre</h2>
+      <span class="section-badge">Chave mestra global</span>
+    </div>
+    <p class="muted">
+      Esta é a sua central de comando. Aqui você visualiza, edita e governa toda a plataforma:
+      comunidades, hierarquia de usuários, aprovações e operação comercial completa.
+    </p>
+  </article>
+
+  <article class="panel full-span">
+    <div class="stats-grid">
+      <div class="metric-card">
+        <p>Usuários ativos</p>
+        <strong>{{ totals.active_users }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Mestres ativos</p>
+        <strong>{{ totals.active_masters }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Admins de comunidade</p>
+        <strong>{{ totals.active_community_admins }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Gestores ativos</p>
+        <strong>{{ totals.active_managers }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Comunidades ativas</p>
+        <strong>{{ totals.active_communities }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Solicitações pendentes</p>
+        <strong>{{ totals.pending_user_requests }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Vendas registradas</p>
+        <strong>{{ totals.total_sales }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Cursos ativos</p>
+        <strong>{{ totals.active_courses }}</strong>
+      </div>
+    </div>
+  </article>
+
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Atalhos da chave mestra</h2>
+      <span class="section-badge">Poder total de edição</span>
+    </div>
+    <div class="actions">
+      <a class="btn btn-secondary" href="{{ url_for('manage_communities') }}">Criar e editar comunidades</a>
+      <a class="btn btn-secondary" href="{{ url_for('manage_users') }}">Editar Hierarquia de Usuários</a>
+      <a class="btn btn-secondary" href="{{ url_for('user_access_requests') }}">Aprovar entradas de usuários</a>
+      <a class="btn btn-secondary" href="{{ url_for('manage_companies') }}">Gerenciar Empresas</a>
+      <a class="btn btn-secondary" href="{{ url_for('manage_courses') }}">Gerenciar Cursos</a>
+      <a class="btn btn-secondary" href="{{ url_for('admin_course_requests') }}">Aprovar acesso a cursos</a>
+      <a class="btn btn-secondary" href="{{ url_for('dashboard') }}">Visão global de vendas</a>
+      <a class="btn btn-secondary" href="{{ url_for('dashboard_recorrencia') }}">Central de recorrência</a>
+    </div>
+  </article>
+
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Direitos exclusivos do mestre</h2>
+      <span class="section-badge">Governança da plataforma</span>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Função exclusiva</th>
+            <th>Descrição</th>
+            <th>Onde editar</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Governar comunidades</td>
+            <td>Criar, renomear, ativar/inativar comunidades e definir admin/gestor principal.</td>
+            <td><a class="mini-btn" href="{{ url_for('manage_communities') }}">Comunidades</a></td>
+          </tr>
+          <tr>
+            <td>Definir hierarquia global</td>
+            <td>Promover/rebaixar usuários entre mestre, admin, gestor, vendedor e visualizador.</td>
+            <td><a class="mini-btn" href="{{ url_for('manage_users') }}">Usuários</a></td>
+          </tr>
+          <tr>
+            <td>Aprovar qualquer entrada</td>
+            <td>Visualizar e aprovar solicitações de todas as comunidades.</td>
+            <td><a class="mini-btn" href="{{ url_for('user_access_requests') }}">Solicitações</a></td>
+          </tr>
+          <tr>
+            <td>Operação comercial total</td>
+            <td>Visualizar e editar vendas, empresas, cursos e recorrência de toda a base.</td>
+            <td><a class="mini-btn" href="{{ url_for('dashboard') }}">Dashboard</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Mapa operacional das comunidades</h2>
+      <span class="section-badge">Resumo operacional</span>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Comunidade</th>
+            <th>Administrador</th>
+            <th>Gestor</th>
+            <th>Usuários ativos</th>
+            <th>Cursos ativos</th>
+            <th>Vendas</th>
+            <th>Solicitações pendentes</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if communities %}
+            {% for community in communities %}
+            <tr>
+              <td>{{ community.name }}</td>
+              <td>{{ community.owner_admin_name }}</td>
+              <td>{{ community.manager_name or '-' }}</td>
+              <td>{{ community.active_users_count }}</td>
+              <td>{{ community.active_courses_count }}</td>
+              <td>{{ community.total_sales_count }}</td>
+              <td>{{ community.pending_requests_count }}</td>
+              <td>{{ 'Ativa' if community.is_active else 'Inativa' }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="8" class="muted">Sem comunidades cadastradas ainda.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

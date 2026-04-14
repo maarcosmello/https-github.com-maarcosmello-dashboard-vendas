@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Comunidades | Comissionamento{% endblock %}
+
+{% block content %}
+<section class="layout">
+  <article class="panel">
+    <div class="section-title-row">
+      <h2>Nova comunidade</h2>
+      <span class="section-badge">Somente mestre</span>
+    </div>
+    <form method="post" class="grid-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="create">
+      <label>Nome da comunidade<input type="text" name="name" required></label>
+      <label>
+        Administrador da comunidade
+        <select name="owner_admin_id" required>
+          <option value="">Selecione</option>
+          {% for admin in community_admins %}
+          <option value="{{ admin.id }}">{{ admin.full_name }} ({{ admin.username }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Gestor principal (opcional)
+        <select name="manager_user_id">
+          <option value="">Sem gestor principal</option>
+          {% for manager in managers %}
+          <option value="{{ manager.id }}">{{ manager.full_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="btn btn-primary" type="submit">Criar comunidade</button>
+    </form>
+  </article>
+
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Comunidades cadastradas</h2>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Comunidade</th>
+            <th>Admin</th>
+            <th>Gestor principal</th>
+            <th>Status</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if communities %}
+            {% for community in communities %}
+            <tr>
+              <td>{{ community.name }}</td>
+              <td>{{ community.owner_admin_name }} ({{ community.owner_admin_username }})</td>
+              <td>{{ community.manager_name or '-' }}</td>
+              <td>{{ 'Ativa' if community.is_active else 'Inativa' }}</td>
+              <td>
+                <div class="row-actions">
+                  <form method="post" class="inline-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="update">
+                    <input type="hidden" name="community_id" value="{{ community.id }}">
+                    <input type="text" name="name" value="{{ community.name }}" required>
+                    <select name="manager_user_id">
+                      <option value="">Sem gestor principal</option>
+                      {% for manager in managers %}
+                      <option value="{{ manager.id }}" {% if community.manager_user_id == manager.id %}selected{% endif %}>
+                        {{ manager.full_name }}
+                      </option>
+                      {% endfor %}
+                    </select>
+                    <button class="mini-btn" type="submit">Atualizar</button>
+                  </form>
+                  <form method="post" class="inline-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="toggle_active">
+                    <input type="hidden" name="community_id" value="{{ community.id }}">
+                    <button class="mini-btn" type="submit">{{ 'Desativar' if community.is_active else 'Ativar' }}</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="5" class="muted">Nenhuma comunidade cadastrada.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

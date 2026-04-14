@@ -1,6 +1,47 @@
 (function () {
   function toNumber(value) {
-    const parsed = Number(String(value || "").replace(",", "."));
+    const raw = String(value || "").trim().replace(/\s+/g, "");
+    if (!raw) {
+      return 0;
+    }
+    let normalized = raw;
+    if (raw.includes(",") && raw.includes(".")) {
+      const lastComma = raw.lastIndexOf(",");
+      const lastDot = raw.lastIndexOf(".");
+      if (lastComma > lastDot) {
+        normalized = raw.replace(/\./g, "").replace(",", ".");
+      } else {
+        normalized = raw.replace(/,/g, "");
+      }
+    } else if (raw.includes(",")) {
+      const idx = raw.lastIndexOf(",");
+      const left = raw.slice(0, idx);
+      const right = raw.slice(idx + 1);
+      normalized = right.length <= 2 ? `${left.replace(/,/g, "")}.${right}` : raw.replace(/,/g, "");
+    } else if (raw.includes(".")) {
+      const parts = raw.split(".");
+      if (parts.length === 2) {
+        const [left, right] = parts;
+        if (right.length <= 2) {
+          normalized = `${left}.${right}`;
+        } else if (right.length === 3) {
+          normalized = `${left}${right}`;
+        } else if (/^0+$/.test(right) && right.length > 2) {
+          normalized = `${left}${right.slice(0, -2)}`;
+        } else {
+          normalized = `${left}${right}`;
+        }
+      } else {
+        const last = parts.at(-1) || "";
+        if (last.length <= 2) {
+          normalized = `${parts.slice(0, -1).join("")}.${last}`;
+        } else {
+          normalized = parts.join("");
+        }
+      }
+    }
+
+    const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
@@ -41,7 +82,7 @@
               borderRadius: 8,
             },
             {
-              label: "Comissao prevista",
+              label: "Comissão prevista",
               data: payload.monthly.commission,
               backgroundColor: "rgba(255, 122, 26, 0.8)",
               borderRadius: 8,
@@ -59,7 +100,7 @@
           labels: payload.yearly.labels,
           datasets: [
             {
-              label: "Comissao por ano",
+              label: "Comissão por ano",
               data: payload.yearly.commission,
               borderColor: "rgba(13, 122, 95, 0.9)",
               backgroundColor: "rgba(13, 122, 95, 0.2)",
@@ -79,7 +120,7 @@
           labels: payload.course.labels,
           datasets: [
             {
-              label: "Comissao por curso",
+              label: "Comissão por curso",
               data: payload.course.commission,
               backgroundColor: [
                 "#0d7a5f",
@@ -107,9 +148,12 @@
     const companySelect = document.getElementById("company-select");
     const courseSelect = document.getElementById("course-select");
     const paymentFormat = document.getElementById("payment-format");
+    const commissionModeWrap = document.getElementById("commission-payment-mode-wrap");
+    const commissionMode = document.getElementById("commission-payment-mode");
     const installmentsInput = document.getElementById("installments-count");
     const totalValueInput = document.getElementById("total-value");
     const commissionInput = document.getElementById("commission-percent");
+    const previewLabel = document.getElementById("commission-preview-label");
     const preview = document.getElementById("commission-preview");
 
     function filterCoursesByCompany() {
@@ -160,24 +204,80 @@
       updatePreview();
     }
 
+    function updateCommissionModeBehavior() {
+      const isRecurring = paymentFormat.value === "recorrencia";
+      if (commissionModeWrap) {
+        commissionModeWrap.style.display = isRecurring ? "" : "none";
+      }
+      if (commissionMode) {
+        commissionMode.disabled = !isRecurring;
+        if (!isRecurring) {
+          commissionMode.value = "per_installment";
+        }
+      }
+    }
+
     function updatePreview() {
       const total = toNumber(totalValueInput.value);
       const commissionPercent = toNumber(commissionInput.value);
       const installments = Math.max(1, parseInt(installmentsInput.value || "1", 10));
       const installmentValue = total / installments;
+      const totalCommission = (total * commissionPercent) / 100;
       const commissionPerInstallment = (installmentValue * commissionPercent) / 100;
-      preview.textContent = formatCurrency(commissionPerInstallment);
+
+      let previewValue = commissionPerInstallment;
+      if (previewLabel) {
+        previewLabel.textContent = "Comissão prevista por parcela:";
+      }
+      if (paymentFormat.value === "avista") {
+        previewValue = totalCommission;
+        if (previewLabel) {
+          previewLabel.textContent = "Comissão prevista da venda:";
+        }
+      } else if (
+        paymentFormat.value === "recorrencia" &&
+        commissionMode &&
+        commissionMode.value === "upfront_first_installment"
+      ) {
+        previewValue = totalCommission;
+        if (previewLabel) {
+          previewLabel.textContent = "Comissão total na 1ª parcela:";
+        }
+      }
+      preview.textContent = formatCurrency(previewValue);
     }
 
     companySelect.addEventListener("change", filterCoursesByCompany);
     courseSelect.addEventListener("change", applyCourseDefaultCommission);
-    paymentFormat.addEventListener("change", updateInstallmentsBehavior);
+    paymentFormat.addEventListener("change", () => {
+      updateInstallmentsBehavior();
+      updateCommissionModeBehavior();
+    });
+    if (commissionMode) {
+      commissionMode.addEventListener("change", updatePreview);
+    }
     totalValueInput.addEventListener("input", updatePreview);
     installmentsInput.addEventListener("input", updatePreview);
     commissionInput.addEventListener("input", updatePreview);
+    form.addEventListener("submit", (event) => {
+      if (paymentFormat.value !== "recorrencia") {
+        return;
+      }
+      const selectedLabel =
+        commissionMode && commissionMode.options[commissionMode.selectedIndex]
+          ? commissionMode.options[commissionMode.selectedIndex].textContent
+          : "Comissão em recorrência (por parcela)";
+      const confirmed = window.confirm(
+        `Confirma que a comissão desta venda recorrente será: ${selectedLabel}?`
+      );
+      if (!confirmed) {
+        event.preventDefault();
+      }
+    });
 
     filterCoursesByCompany();
     updateInstallmentsBehavior();
+    updateCommissionModeBehavior();
     updatePreview();
   }
 
@@ -209,7 +309,73 @@
     });
   }
 
+  function bindReminderCopy() {
+    const buttons = document.querySelectorAll(".copy-reminder-btn");
+    if (!buttons.length) {
+      return;
+    }
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", async () => {
+        const message = button.dataset.message || "";
+        if (!message) {
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(message);
+          button.textContent = "Mensagem copiada";
+        } catch {
+          const helper = document.createElement("textarea");
+          helper.value = message;
+          document.body.appendChild(helper);
+          helper.select();
+          document.execCommand("copy");
+          helper.remove();
+          button.textContent = "Mensagem copiada";
+        }
+      });
+    });
+  }
+
+  function bindInternationalPhone() {
+    const input = document.getElementById("customer-phone");
+    if (!input) {
+      return;
+    }
+    input.placeholder = "+12 345 678 9101";
+
+    if (typeof window.intlTelInput !== "function") {
+      return;
+    }
+
+    const iti = window.intlTelInput(input, {
+      initialCountry: "auto",
+      autoPlaceholder: "polite",
+      nationalMode: false,
+      formatOnDisplay: true,
+      preferredCountries: ["br", "us", "pt", "es", "gb", "fr", "it", "de"],
+      geoIpLookup: (callback) => {
+        fetch("https://ipapi.co/json/")
+          .then((resp) => resp.json())
+          .then((data) => callback((data && data.country_code ? data.country_code : "br").toLowerCase()))
+          .catch(() => callback("br"));
+      },
+    });
+
+    const form = document.getElementById("sale-form");
+    if (form) {
+      form.addEventListener("submit", () => {
+        const full = iti.getNumber();
+        if (full) {
+          input.value = full;
+        }
+      });
+    }
+  }
+
   renderCharts();
   bindSaleForm();
   bindForgotPassword();
+  bindReminderCopy();
+  bindInternationalPhone();
 })();

@@ -4,13 +4,13 @@
 
 {% block content %}
 <section class="panel auth-panel">
-  <h2>Configuracao Inicial</h2>
-  <p class="muted">Crie o primeiro usuario administrador.</p>
+  <h2>Configuração Inicial</h2>
+  <p class="muted">Crie o primeiro usuário administrador. Se o usuário for <strong>MarcosMello2402</strong>, ele será criado como mestre. Para os demais usuários, o login deve ter no máximo 8 caracteres.</p>
   <form method="post" class="grid-form auth-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>
-      Usuario
-      <input type="text" name="username" placeholder="admin (sem espacos)" required>
+      Usuário
+      <input type="text" name="username" placeholder="admin01 (sem espaços)" required>
     </label>
     <label>
       Nome completo
@@ -18,13 +18,13 @@
     </label>
     <label>
       Senha
-      <input type="password" name="password" required>
+      <input type="password" name="password" maxlength="8" required>
     </label>
     <label>
       Confirmar senha
-      <input type="password" name="password_confirm" required>
+      <input type="password" name="password_confirm" maxlength="8" required>
     </label>
-    <button class="btn btn-primary" type="submit">Criar administrador</button>
+    <button class="btn btn-primary" type="submit">Criar Administrador</button>
   </form>
 </section>
 {% endblock %}

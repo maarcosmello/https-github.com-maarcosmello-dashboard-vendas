@@ -120,6 +120,14 @@ p {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.mini-link.active {
+  background: #f4fff9;
+  border-color: #d6ffe9;
+  color: #0a5f49;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px rgba(214, 255, 233, 0.55);
+}
+
 .section-title-row {
   display: flex;
   justify-content: space-between;
@@ -272,7 +280,7 @@ textarea {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 1350px;
+  min-width: 1480px;
 }
 
 thead {
@@ -298,6 +306,30 @@ td {
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.inline-check input {
+  width: auto;
+}
+
+.iti {
+  width: 100%;
+}
+
+.iti input {
+  width: 100%;
+}
+
+.iti__country-list {
+  max-width: 320px;
 }
 
 .mini-btn {

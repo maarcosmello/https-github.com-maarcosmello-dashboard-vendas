@@ -7,7 +7,7 @@
   {% if current_user.role == 'viewer' %}
   <article class="panel full-span">
     <div class="section-title-row">
-      <h2>Meus acessos de visualizacao</h2>
+      <h2>Meus acessos de visualização</h2>
       <span class="section-badge">Cursos autorizados</span>
     </div>
     {% if viewer_accesses %}
@@ -19,7 +19,7 @@
           <tr>
             <td>{{ acc.company_name }}</td>
             <td>{{ acc.course_name }}</td>
-            <td>{% if acc.is_permanent %}Perpetuo{% else %}{{ acc.expires_at|date_br }}{% endif %}</td>
+            <td>{% if acc.is_permanent %}Perpétuo{% else %}{{ acc.expires_at|date_br }}{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -31,14 +31,97 @@
   </article>
   {% endif %}
 
+  {% if recurring_only %}
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Controle de parcelas (recorrência + parcelado)</h2>
+      <span class="section-badge">Vencidas / hoje / próximos 7 dias</span>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Categoria</th>
+            <th>Vencimento</th>
+            <th>Cliente</th>
+            <th>Curso</th>
+            <th>Parcela</th>
+            <th>Status</th>
+            <th>Mensagem</th>
+            <th>Checklist</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if recurring_followup_rows %}
+            {% for row in recurring_followup_rows %}
+            <tr>
+              <td>
+                {% if row.followup_bucket == 'vencida' %}
+                  Vencida
+                {% elif row.followup_bucket == 'vence_hoje' %}
+                  Vence hoje
+                {% else %}
+                  Próximos 7 dias
+                {% endif %}
+              </td>
+              <td>{{ row.due_date|date_br }}</td>
+              <td>{{ row.customer_name }}</td>
+              <td>{{ row.company_name }} - {{ row.course_name }}</td>
+              <td>{{ row.installment_number }}/{{ row.installments_count }}</td>
+              <td>{{ row.display_status_label }}</td>
+              <td>
+                <button
+                  type="button"
+                  class="mini-btn copy-reminder-btn"
+                  data-message="{{ row.reminder_message }}"
+                >
+                  Copiar mensagem
+                </button>
+              </td>
+              <td>
+                {% if can_write and row.can_edit %}
+                <div class="row-actions">
+                  <form method="post" action="{{ url_for('update_followup_status', installment_id=row.installment_id) }}" class="inline-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="return_to" value="{{ current_path }}">
+                    <input type="hidden" name="action" value="toggle_check">
+                    <input type="hidden" name="checked" value="{{ 0 if row.seller_followup_checked else 1 }}">
+                    <button class="mini-btn" type="submit">{{ 'Desmarcar OK' if row.seller_followup_checked else 'Marcar OK' }}</button>
+                  </form>
+                  {% if row.installment_status != 'confirmado' %}
+                  <form method="post" action="{{ url_for('update_followup_status', installment_id=row.installment_id) }}" class="inline-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="return_to" value="{{ current_path }}">
+                    <input type="hidden" name="action" value="mark_paid">
+                    <button class="mini-btn" type="submit">Atrasado já pago</button>
+                  </form>
+                  {% endif %}
+                </div>
+                {% else %}
+                <span class="muted">Somente leitura</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="8" class="muted">Nenhuma recorrência pendente para hoje, atrasada ou próximos 7 dias.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+  {% endif %}
+
   <article class="panel full-span">
     <div class="section-title-row">
       <h2>Filtros</h2>
-      <span class="section-badge">{{ 'Somente recorrencia' if recurring_only else 'Tabela geral' }}</span>
+      <span class="section-badge">{{ 'Parcelado e recorrência' if recurring_only else 'Tabela geral' }}</span>
     </div>
     <form method="get" class="grid-form filters">
       <label>
-        Data da venda inicial
+        Data da venda
         <input type="date" name="sale_date_start" value="{{ filters.sale_date_start }}">
       </label>
       <label>
@@ -59,7 +142,7 @@
           {% endfor %}
         </select>
       </label>
-      {% if current_user.role in ('admin', 'viewer') %}
+      {% if sellers %}
       <label>
         Vendedor
         <select name="seller_id">
@@ -80,14 +163,14 @@
         </select>
       </label>
       <label>
-        Formato pagamento
+        Formato de pagamento
         <select name="payment_format" {% if recurring_only %}disabled{% endif %}>
           <option value="">Todos</option>
           {% for key, label in payment_formats.items() %}
-          <option value="{{ key }}" {% if filters.payment_format == key or (recurring_only and key == 'recorrencia') %}selected{% endif %}>{{ label }}</option>
+          <option value="{{ key }}" {% if filters.payment_format == key %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
-        {% if recurring_only %}<input type="hidden" name="payment_format" value="recorrencia">{% endif %}
+        {% if recurring_only %}<input type="hidden" name="recurring_only" value="1">{% endif %}
       </label>
       <label>
         Status do pagamento
@@ -99,22 +182,22 @@
         </select>
       </label>
       <label>
-        Valor minimo
+        Valor mínimo
         <input type="number" step="0.01" min="0" name="min_value" value="{{ filters.min_value if filters.min_value is not none else '' }}">
       </label>
       <label>
-        Valor maximo
+        Valor máximo
         <input type="number" step="0.01" min="0" name="max_value" value="{{ filters.max_value if filters.max_value is not none else '' }}">
       </label>
       <label class="full">
         Busca geral
-        <input type="text" name="search" placeholder="cliente, email, empresa, curso, vendedor" value="{{ filters.search }}">
+        <input type="text" name="search" placeholder="cliente, telefone, empresa, curso, vendedor" value="{{ filters.search }}">
       </label>
       <div class="actions full">
         <button class="btn btn-primary" type="submit">Aplicar filtros</button>
         <a class="btn btn-secondary" href="{{ url_for('dashboard_recorrencia') if recurring_only else url_for('dashboard') }}">Limpar</a>
         <a class="btn btn-secondary" href="{{ url_for('dashboard') }}">Tabela geral</a>
-        <a class="btn btn-secondary" href="{{ url_for('dashboard_recorrencia') }}">Somente recorrencia</a>
+        <a class="btn btn-secondary" href="{{ url_for('dashboard_recorrencia') }}">Somente recorrência</a>
         <a class="btn btn-secondary" href="{{ export_url }}">Exportar Excel filtrado</a>
       </div>
     </form>
@@ -131,20 +214,32 @@
         <strong>{{ totals.projected_value|currency }}</strong>
       </div>
       <div class="metric-card">
-        <p>Previsto (comissao)</p>
+        <p>Previsto (comissão)</p>
         <strong>{{ totals.projected_commission|currency }}</strong>
       </div>
       <div class="metric-card">
-        <p>Confirmado (comissao)</p>
+        <p>Confirmado (comissão)</p>
         <strong>{{ totals.confirmed_commission|currency }}</strong>
       </div>
       <div class="metric-card">
-        <p>Cancelado (comissao)</p>
+        <p>Cancelado (comissão)</p>
         <strong>{{ totals.canceled_commission|currency }}</strong>
       </div>
       <div class="metric-card">
-        <p>Atrasado (comissao)</p>
+        <p>Atrasado (comissão)</p>
         <strong>{{ totals.overdue_commission|currency }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Atrasado (valor)</p>
+        <strong>{{ totals.overdue_value|currency }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Pendente (comissão)</p>
+        <strong>{{ totals.pending_commission|currency }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Pendente (valor)</p>
+        <strong>{{ totals.pending_value|currency }}</strong>
       </div>
     </div>
 
@@ -155,11 +250,11 @@
     </div>
   </article>
 
-  {% if can_write %}
+  {% if can_write and not recurring_only %}
   <article class="panel full-span">
     <div class="section-title-row">
       <h2>{{ 'Editar venda' if sale_form.sale_id else 'Nova venda' }}</h2>
-      <span class="section-badge">A vista / Parcelado / Recorrencia</span>
+      <span class="section-badge">À vista / Parcelado / Recorrência</span>
     </div>
     <form method="post" action="{{ url_for('save_sale') }}" id="sale-form" class="grid-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -172,11 +267,7 @@
       </label>
       <label>
         Telefone
-        <input type="tel" inputmode="tel" name="customer_phone" value="{{ sale_form.customer_phone }}" placeholder="+1 415 555 2671">
-      </label>
-      <label>
-        Email
-        <input type="email" name="customer_email" value="{{ sale_form.customer_email }}" placeholder="cliente@email.com">
+        <input id="customer-phone" type="tel" inputmode="tel" name="customer_phone" value="{{ sale_form.customer_phone }}" placeholder="+12 345 678 9101">
       </label>
       <label>
         Data da venda
@@ -195,7 +286,7 @@
         Curso
         <select id="course-select" name="course_id" required>
           <option value="">Selecione</option>
-          {% for course in courses %}
+          {% for course in sale_courses %}
           <option
             value="{{ course.id }}"
             data-company-id="{{ course.company_id }}"
@@ -215,6 +306,14 @@
           {% endfor %}
         </select>
       </label>
+      <label id="commission-payment-mode-wrap">
+        Modalidade de pagamento da comissão (somente recorrência)
+        <select id="commission-payment-mode" name="commission_payment_mode" required>
+          {% for key, label in commission_payment_modes.items() %}
+          <option value="{{ key }}" {% if sale_form.commission_payment_mode == key %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <label>
         Parcelas
         <input id="installments-count" type="number" name="installments_count" min="1" value="{{ sale_form.installments_count }}" required>
@@ -224,12 +323,12 @@
         <input id="total-value" type="number" step="0.01" min="0.01" name="total_value" value="{{ sale_form.total_value }}" required>
       </label>
       <label>
-        Comissao (%)
+        Comissão (%)
         <input id="commission-percent" type="number" step="0.01" min="0" max="100" name="commission_percent" value="{{ sale_form.commission_percent }}" required>
       </label>
-      {% if current_user.role == 'admin' %}
+      {% if current_user.role == 'admin' or current_user.is_manager %}
       <label>
-        Vendedor responsavel
+        Vendedor responsável
         <select name="seller_id" required>
           <option value="">Selecione</option>
           {% for seller in sellers %}
@@ -239,12 +338,12 @@
       </label>
       {% endif %}
       <label class="full">
-        Observacoes
+        Observações
         <textarea name="notes" rows="3">{{ sale_form.notes }}</textarea>
       </label>
 
       <div class="inline-metric full">
-        <span>Comissao prevista por parcela:</span>
+        <span id="commission-preview-label">Comissão prevista por parcela:</span>
         <strong id="commission-preview">R$ 0,00</strong>
       </div>
 
@@ -261,28 +360,28 @@
 
   <article class="panel full-span">
     <div class="section-title-row">
-      <h2>{{ 'Tabela de recorrencia' if recurring_only else 'Tabela geral de vendas e parcelas' }}</h2>
+      <h2>{{ 'Tabela de recorrência' if recurring_only else 'Tabela geral de vendas e parcelas' }}</h2>
       <span class="section-badge">Detalhamento</span>
     </div>
     <div class="table-wrapper">
       <table>
         <thead>
           <tr>
-            <th>Data venda</th>
+            <th>Data da venda</th>
             <th>Vencimento</th>
-            <th>Mes</th>
+            <th>Mês</th>
             <th>Cliente</th>
             <th>Telefone</th>
-            <th>Email</th>
             <th>Empresa</th>
             <th>Curso</th>
             <th>Vendedor</th>
             <th>Pagamento</th>
+            <th>Modalidade da comissão</th>
             <th>Parcela</th>
             <th>Valor</th>
-            <th>Comissao</th>
+            <th>Comissão</th>
             <th>Status pagamento</th>
-            <th>Acoes</th>
+            <th>Ações</th>
           </tr>
         </thead>
         <tbody>
@@ -294,15 +393,15 @@
               <td>{{ row.month_key|month_br }}</td>
               <td>{{ row.customer_name }}</td>
               <td>{{ row.customer_phone or '-' }}</td>
-              <td>{{ row.customer_email or '-' }}</td>
               <td>{{ row.company_name }}</td>
               <td>{{ row.course_name }}</td>
               <td>{{ row.seller_name }}</td>
               <td>{{ payment_formats[row.payment_format] }}</td>
+              <td>{{ commission_payment_modes.get(row.commission_payment_mode, row.commission_payment_mode) }}</td>
               <td>{{ row.installment_number }}/{{ row.installments_count }}</td>
               <td>{{ row.installment_value|currency }}</td>
               <td>{{ row.commission_value|currency }} ({{ row.commission_percent }}%)</td>
-              <td>{{ installment_statuses[row.installment_status] }}</td>
+              <td>{{ row.display_status_label }}</td>
               <td>
                 {% if can_write and row.can_edit %}
                 <div class="row-actions">
@@ -313,6 +412,7 @@
                   </form>
                   <form method="post" action="{{ url_for('update_installment_status', installment_id=row.installment_id) }}" class="inline-form">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="return_to" value="{{ current_path }}">
                     <select name="status">
                       {% for key, label in installment_statuses.items() %}
                       <option value="{{ key }}" {% if row.installment_status == key %}selected{% endif %}>{{ label }}</option>

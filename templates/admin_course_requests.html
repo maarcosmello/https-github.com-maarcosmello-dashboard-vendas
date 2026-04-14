@@ -1,24 +1,24 @@
 {% extends "base.html" %}
 
-{% block title %}Solicitacoes de Curso | Comissionamento{% endblock %}
+{% block title %}Solicitações de Curso | Comissionamento{% endblock %}
 
 {% block content %}
 <section class="panel full-span">
   <div class="section-title-row">
-    <h2>Solicitacoes de acesso (visualizadores)</h2>
-    <span class="section-badge">Admin</span>
+    <h2>Solicitações de acesso (visualizadores)</h2>
+    <span class="section-badge">Admin / Gestor / Mestre</span>
   </div>
   <div class="table-wrapper">
     <table>
       <thead>
         <tr>
           <th>Data</th>
-          <th>Usuario</th>
+          <th>Usuário</th>
           <th>Empresa</th>
           <th>Curso</th>
           <th>Status</th>
           <th>Obs.</th>
-          <th>Acoes</th>
+          <th>Ações</th>
         </tr>
       </thead>
       <tbody>
@@ -40,7 +40,7 @@
                   <input type="hidden" name="request_id" value="{{ req.id }}">
                   <input type="number" name="approval_days" min="1" placeholder="dias" style="width:90px;">
                   <label style="display:flex;align-items:center;gap:4px;">
-                    <input type="checkbox" name="is_permanent" value="1" style="width:auto;"> Perpetuo
+                    <input type="checkbox" name="is_permanent" value="1" style="width:auto;"> Perpétuo
                   </label>
                   <button class="mini-btn" type="submit">Aprovar</button>
                 </form>
@@ -52,13 +52,13 @@
                 </form>
               </div>
               {% else %}
-              <span class="muted">Ja analisada</span>
+              <span class="muted">Já analisada</span>
               {% endif %}
             </td>
           </tr>
           {% endfor %}
         {% else %}
-          <tr><td colspan="7" class="muted">Sem solicitacoes.</td></tr>
+          <tr><td colspan="7" class="muted">Sem solicitações.</td></tr>
         {% endif %}
       </tbody>
     </table>

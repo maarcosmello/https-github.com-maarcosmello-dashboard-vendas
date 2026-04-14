@@ -21,10 +21,10 @@
         </select>
       </label>
       <label class="full">
-        Observacao da solicitacao (opcional)
-        <textarea name="request_note" rows="3" placeholder="Motivo da solicitacao"></textarea>
+        Observação da solicitação (opcional)
+        <textarea name="request_note" rows="3" placeholder="Motivo da solicitação"></textarea>
       </label>
-      <button class="btn btn-primary" type="submit">Enviar solicitacao</button>
+      <button class="btn btn-primary" type="submit">Enviar solicitação</button>
     </form>
   </article>
 
@@ -39,7 +39,7 @@
             <tr>
               <td>{{ access.company_name }}</td>
               <td>{{ access.course_name }}</td>
-              <td>{% if access.is_permanent %}Perpetuo{% else %}{{ access.expires_at|date_br }}{% endif %}</td>
+              <td>{% if access.is_permanent %}Perpétuo{% else %}{{ access.expires_at|date_br }}{% endif %}</td>
             </tr>
             {% endfor %}
           {% else %}
@@ -51,10 +51,10 @@
   </article>
 
   <article class="panel full-span">
-    <div class="section-title-row"><h2>Historico de solicitacoes</h2></div>
+    <div class="section-title-row"><h2>Histórico de solicitações</h2></div>
     <div class="table-wrapper">
       <table>
-        <thead><tr><th>Data</th><th>Empresa</th><th>Curso</th><th>Status</th><th>Validade</th><th>Observacao</th></tr></thead>
+        <thead><tr><th>Data</th><th>Empresa</th><th>Curso</th><th>Status</th><th>Validade</th><th>Observação</th></tr></thead>
         <tbody>
           {% if requests %}
             {% for req in requests %}
@@ -65,14 +65,14 @@
               <td>{{ req.status }}</td>
               <td>
                 {% if req.status == 'aprovado' %}
-                  {% if req.is_permanent %}Perpetuo{% elif req.approval_days %}{{ req.approval_days }} dias{% else %}-{% endif %}
+                  {% if req.is_permanent %}Perpétuo{% elif req.approval_days %}{{ req.approval_days }} dias{% else %}-{% endif %}
                 {% else %}-{% endif %}
               </td>
               <td>{{ req.request_note or '-' }}</td>
             </tr>
             {% endfor %}
           {% else %}
-            <tr><td colspan="6" class="muted">Sem solicitacoes registradas.</td></tr>
+            <tr><td colspan="6" class="muted">Sem solicitações registradas.</td></tr>
           {% endif %}
         </tbody>
       </table>

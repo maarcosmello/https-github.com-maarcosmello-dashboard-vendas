@@ -8,6 +8,7 @@
     <div class="section-title-row">
       <h2>Novo curso</h2>
     </div>
+    {% if can_create_course %}
     <form method="post" class="grid-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="action" value="create">
@@ -21,9 +22,14 @@
         </select>
       </label>
       <label>Nome do curso<input type="text" name="name" required></label>
-      <label>Comissao padrao (%)<input type="number" step="0.01" min="0" max="100" name="default_commission_percent" required></label>
+      <label>Comissão padrão (%)<input type="number" step="0.01" min="0" max="100" name="default_commission_percent" required></label>
       <button class="btn btn-primary" type="submit">Salvar curso</button>
     </form>
+    {% else %}
+    <p class="muted">
+      Vendedores não podem criar cursos. Você pode apenas editar cursos em que recebeu permissão.
+    </p>
+    {% endif %}
   </article>
 
   <article class="panel full-span">
@@ -31,7 +37,7 @@
     <div class="table-wrapper">
       <table>
         <thead>
-          <tr><th>Empresa</th><th>Curso</th><th>% Padrao</th><th>Status</th><th>Acoes</th></tr>
+          <tr><th>Empresa</th><th>Curso</th><th>% Padrão</th><th>Status</th><th>Ações</th></tr>
         </thead>
         <tbody>
           {% for course in courses %}

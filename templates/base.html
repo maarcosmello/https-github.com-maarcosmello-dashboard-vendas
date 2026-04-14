@@ -7,8 +7,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/intl-tel-input@23.8.0/build/css/intlTelInput.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/intl-tel-input@23.8.0/build/js/intlTelInput.min.js"></script>
   <script defer src="{{ url_for('static', filename='main.js') }}"></script>
   {% block head_extra %}{% endblock %}
 </head>
@@ -20,23 +22,34 @@
         <h1>Dashboard de Vendas</h1>
       </div>
       {% if current_user %}
+      {% set current_ep = request.endpoint or '' %}
       <div class="topbar-actions">
-        <span class="pill">{{ current_user.full_name }} ({{ role_labels[current_user.role] }})</span>
-        <a class="mini-link" href="{{ url_for('dashboard') }}">Dashboard</a>
-        <a class="mini-link" href="{{ url_for('dashboard_recorrencia') }}">Recorrencia</a>
+        <span class="pill">
+          {{ current_user.full_name }}
+          ({{ user_profile_label(current_user) }})
+        </span>
+        <a class="mini-link {% if current_ep in ['dashboard'] %}active{% endif %}" href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a class="mini-link {% if current_ep in ['dashboard_recorrencia'] %}active{% endif %}" href="{{ url_for('dashboard_recorrencia') }}">Recorrência</a>
         {% if current_user.role == 'viewer' %}
-        <a class="mini-link" href="{{ url_for('viewer_course_access') }}">Meus Cursos</a>
+        <a class="mini-link {% if current_ep in ['viewer_course_access'] %}active{% endif %}" href="{{ url_for('viewer_course_access') }}">Meus Cursos</a>
         {% endif %}
-        {% if current_user.role == 'admin' %}
-        <a class="mini-link" href="{{ url_for('manage_users') }}">Usuarios</a>
-        <a class="mini-link" href="{{ url_for('manage_companies') }}">Empresas</a>
-        <a class="mini-link" href="{{ url_for('manage_courses') }}">Cursos</a>
-        <a class="mini-link" href="{{ url_for('admin_course_requests') }}">Solicitacoes</a>
+        {% if current_user.role == 'admin' or current_user.is_manager %}
+        <a class="mini-link {% if current_ep in ['manage_users'] %}active{% endif %}" href="{{ url_for('manage_users') }}">Usuários</a>
+        <a class="mini-link {% if current_ep in ['user_access_requests'] %}active{% endif %}" href="{{ url_for('user_access_requests') }}">Solicitações de Usuários</a>
+        {% if current_user.is_master %}
+        <a class="mini-link {% if current_ep in ['master_features'] %}active{% endif %}" href="{{ url_for('master_features') }}">Mestre</a>
+        <a class="mini-link {% if current_ep in ['manage_communities'] %}active{% endif %}" href="{{ url_for('manage_communities') }}">Comunidades</a>
+        {% endif %}
+        <a class="mini-link {% if current_ep in ['manage_companies'] %}active{% endif %}" href="{{ url_for('manage_companies') }}">Empresas</a>
+        <a class="mini-link {% if current_ep in ['manage_courses'] %}active{% endif %}" href="{{ url_for('manage_courses') }}">Cursos</a>
+        <a class="mini-link {% if current_ep in ['admin_course_requests'] %}active{% endif %}" href="{{ url_for('admin_course_requests') }}">Solicitações</a>
+        {% elif current_user.role == 'seller' %}
+        <a class="mini-link {% if current_ep in ['manage_courses'] %}active{% endif %}" href="{{ url_for('manage_courses') }}">Cursos</a>
         {% endif %}
         <form method="post" action="{{ url_for('update_header_label') }}" class="inline-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="text" name="header_label" placeholder="Nome da sua empresa" value="{{ current_user.header_label or '' }}">
-          <button class="mini-btn" type="submit">Salvar titulo</button>
+          <button class="mini-btn" type="submit">Salvar título</button>
         </form>
         <form method="post" action="{{ url_for('logout') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

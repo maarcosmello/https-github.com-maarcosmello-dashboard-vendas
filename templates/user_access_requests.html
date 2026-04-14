@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Solicitações de Usuários | Comissionamento{% endblock %}
+
+{% block content %}
+<section class="layout">
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Solicitações de Entrada</h2>
+      <span class="section-badge">Admin / Gestor / Mestre</span>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Usuário</th>
+            <th>Nome completo</th>
+            <th>Perfil</th>
+            <th>Usuário de indicação</th>
+            <th>Status</th>
+            <th>Análise</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if requests %}
+            {% for req in requests %}
+            <tr>
+              <td>{{ req.requested_at }}</td>
+              <td>{{ req.requested_username }}</td>
+              <td>{{ req.requested_full_name }}</td>
+              <td>
+                {% if req.desired_profile == 'manager' %}Gestor{% elif req.desired_profile == 'seller' %}Vendedor{% else %}Visualizador{% endif %}
+              </td>
+              <td>{{ req.referral_username }}</td>
+              <td>{{ req.status }}</td>
+              <td>{{ req.reviewer_name or '-' }}</td>
+              <td>
+                {% if req.status == 'pendente' %}
+                <div class="row-actions">
+                  <form method="post" class="inline-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="approve">
+                    <input type="hidden" name="request_id" value="{{ req.id }}">
+                    <input type="text" name="decision_note" placeholder="Observação (opcional)">
+                    <button class="mini-btn" type="submit">Aprovar</button>
+                  </form>
+                  <form method="post" class="inline-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="deny">
+                    <input type="hidden" name="request_id" value="{{ req.id }}">
+                    <input type="text" name="decision_note" placeholder="Motivo da recusa">
+                    <button class="mini-btn delete" type="submit">Recusar</button>
+                  </form>
+                </div>
+                {% else %}
+                <span class="muted">Já analisada</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="8" class="muted">Sem solicitações no momento.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}
