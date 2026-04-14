@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Empresas | Comissionamento{% endblock %}
+
+{% block content %}
+<section class="layout">
+  <article class="panel">
+    <div class="section-title-row">
+      <h2>Nova empresa</h2>
+    </div>
+    <form method="post" class="grid-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="create">
+      <label>Nome da empresa<input type="text" name="name" required></label>
+      <button class="btn btn-primary" type="submit">Salvar empresa</button>
+    </form>
+  </article>
+
+  <article class="panel full-span">
+    <h2>Empresas cadastradas</h2>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Empresa</th><th>Status</th><th>Acoes</th></tr></thead>
+        <tbody>
+          {% for company in companies %}
+          <tr>
+            <td>{{ company.name }}</td>
+            <td>{{ 'Ativa' if company.is_active else 'Inativa' }}</td>
+            <td>
+              <div class="row-actions">
+                <form method="post" class="inline-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="update">
+                  <input type="hidden" name="company_id" value="{{ company.id }}">
+                  <input type="text" name="name" value="{{ company.name }}" required>
+                  <button class="mini-btn" type="submit">Renomear</button>
+                </form>
+                <form method="post" class="inline-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="toggle_active">
+                  <input type="hidden" name="company_id" value="{{ company.id }}">
+                  <button class="mini-btn" type="submit">{{ 'Desativar' if company.is_active else 'Ativar' }}</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

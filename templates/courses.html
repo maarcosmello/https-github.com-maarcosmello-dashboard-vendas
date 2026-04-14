@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Cursos | Comissionamento{% endblock %}
+
+{% block content %}
+<section class="layout">
+  <article class="panel">
+    <div class="section-title-row">
+      <h2>Novo curso</h2>
+    </div>
+    <form method="post" class="grid-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="create">
+      <label>
+        Empresa
+        <select name="company_id" required>
+          <option value="">Selecione</option>
+          {% for company in companies %}
+          <option value="{{ company.id }}">{{ company.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Nome do curso<input type="text" name="name" required></label>
+      <label>Comissao padrao (%)<input type="number" step="0.01" min="0" max="100" name="default_commission_percent" required></label>
+      <button class="btn btn-primary" type="submit">Salvar curso</button>
+    </form>
+  </article>
+
+  <article class="panel full-span">
+    <h2>Cursos cadastrados</h2>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr><th>Empresa</th><th>Curso</th><th>% Padrao</th><th>Status</th><th>Acoes</th></tr>
+        </thead>
+        <tbody>
+          {% for course in courses %}
+          <tr>
+            <td>{{ course.company_name }}</td>
+            <td>{{ course.name }}</td>
+            <td>{{ course.default_commission_percent }}%</td>
+            <td>{{ 'Ativo' if course.is_active else 'Inativo' }}</td>
+            <td>
+              <div class="row-actions">
+                <form method="post" class="inline-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="update">
+                  <input type="hidden" name="course_id" value="{{ course.id }}">
+                  <select name="company_id" required>
+                    {% for company in companies %}
+                    <option value="{{ company.id }}" {% if course.company_id == company.id %}selected{% endif %}>{{ company.name }}</option>
+                    {% endfor %}
+                  </select>
+                  <input type="text" name="name" value="{{ course.name }}" required>
+                  <input type="number" step="0.01" min="0" max="100" name="default_commission_percent" value="{{ course.default_commission_percent }}" required>
+                  <button class="mini-btn" type="submit">Atualizar</button>
+                </form>
+                <form method="post" class="inline-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="toggle_active">
+                  <input type="hidden" name="course_id" value="{{ course.id }}">
+                  <button class="mini-btn" type="submit">{{ 'Desativar' if course.is_active else 'Ativar' }}</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Comissionamento{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script defer src="{{ url_for('static', filename='main.js') }}"></script>
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar panel">
+      <div>
+        <p class="eyebrow">{{ header_label }}</p>
+        <h1>Dashboard de Vendas</h1>
+      </div>
+      {% if current_user %}
+      <div class="topbar-actions">
+        <span class="pill">{{ current_user.full_name }} ({{ role_labels[current_user.role] }})</span>
+        <a class="mini-link" href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a class="mini-link" href="{{ url_for('dashboard_recorrencia') }}">Recorrencia</a>
+        {% if current_user.role == 'viewer' %}
+        <a class="mini-link" href="{{ url_for('viewer_course_access') }}">Meus Cursos</a>
+        {% endif %}
+        {% if current_user.role == 'admin' %}
+        <a class="mini-link" href="{{ url_for('manage_users') }}">Usuarios</a>
+        <a class="mini-link" href="{{ url_for('manage_companies') }}">Empresas</a>
+        <a class="mini-link" href="{{ url_for('manage_courses') }}">Cursos</a>
+        <a class="mini-link" href="{{ url_for('admin_course_requests') }}">Solicitacoes</a>
+        {% endif %}
+        <form method="post" action="{{ url_for('update_header_label') }}" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="text" name="header_label" placeholder="Nome da sua empresa" value="{{ current_user.header_label or '' }}">
+          <button class="mini-btn" type="submit">Salvar titulo</button>
+        </form>
+        <form method="post" action="{{ url_for('logout') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-secondary" type="submit">Sair</button>
+        </form>
+      </div>
+      {% endif %}
+    </header>
+
+    {% with msgs = get_flashed_messages(with_categories=true) %}
+      {% if msgs %}
+      <section class="flash-list">
+        {% for category, msg in msgs %}
+        <article class="flash-item {{ category }}">{{ msg }}</article>
+        {% endfor %}
+      </section>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

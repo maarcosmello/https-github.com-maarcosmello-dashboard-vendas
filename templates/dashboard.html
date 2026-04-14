@@ -1,0 +1,342 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard | Comissionamento{% endblock %}
+
+{% block content %}
+<section class="layout">
+  {% if current_user.role == 'viewer' %}
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Meus acessos de visualizacao</h2>
+      <span class="section-badge">Cursos autorizados</span>
+    </div>
+    {% if viewer_accesses %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Empresa</th><th>Curso</th><th>Validade</th></tr></thead>
+        <tbody>
+          {% for acc in viewer_accesses %}
+          <tr>
+            <td>{{ acc.company_name }}</td>
+            <td>{{ acc.course_name }}</td>
+            <td>{% if acc.is_permanent %}Perpetuo{% else %}{{ acc.expires_at|date_br }}{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted">Sem acessos ativos. Solicite cursos em <a href="{{ url_for('viewer_course_access') }}">Meus Cursos</a>.</p>
+    {% endif %}
+  </article>
+  {% endif %}
+
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Filtros</h2>
+      <span class="section-badge">{{ 'Somente recorrencia' if recurring_only else 'Tabela geral' }}</span>
+    </div>
+    <form method="get" class="grid-form filters">
+      <label>
+        Data da venda inicial
+        <input type="date" name="sale_date_start" value="{{ filters.sale_date_start }}">
+      </label>
+      <label>
+        Empresa
+        <select name="company_id">
+          <option value="">Todas</option>
+          {% for company in companies %}
+          <option value="{{ company.id }}" {% if filters.company_id == company.id %}selected{% endif %}>{{ company.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Curso
+        <select name="course_id">
+          <option value="">Todos</option>
+          {% for course in courses %}
+          <option value="{{ course.id }}" {% if filters.course_id == course.id %}selected{% endif %}>{{ course.company_name }} - {{ course.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if current_user.role in ('admin', 'viewer') %}
+      <label>
+        Vendedor
+        <select name="seller_id">
+          <option value="">Todos</option>
+          {% for seller in sellers %}
+          <option value="{{ seller.id }}" {% if filters.seller_id == seller.id %}selected{% endif %}>{{ seller.full_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      <label>
+        Cliente
+        <select name="customer_name">
+          <option value="">Todos</option>
+          {% for name in customer_names %}
+          <option value="{{ name }}" {% if filters.customer_name == name %}selected{% endif %}>{{ name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Formato pagamento
+        <select name="payment_format" {% if recurring_only %}disabled{% endif %}>
+          <option value="">Todos</option>
+          {% for key, label in payment_formats.items() %}
+          <option value="{{ key }}" {% if filters.payment_format == key or (recurring_only and key == 'recorrencia') %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        {% if recurring_only %}<input type="hidden" name="payment_format" value="recorrencia">{% endif %}
+      </label>
+      <label>
+        Status do pagamento
+        <select name="status">
+          <option value="">Todos</option>
+          {% for key, label in installment_statuses.items() %}
+          <option value="{{ key }}" {% if filters.status == key %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Valor minimo
+        <input type="number" step="0.01" min="0" name="min_value" value="{{ filters.min_value if filters.min_value is not none else '' }}">
+      </label>
+      <label>
+        Valor maximo
+        <input type="number" step="0.01" min="0" name="max_value" value="{{ filters.max_value if filters.max_value is not none else '' }}">
+      </label>
+      <label class="full">
+        Busca geral
+        <input type="text" name="search" placeholder="cliente, email, empresa, curso, vendedor" value="{{ filters.search }}">
+      </label>
+      <div class="actions full">
+        <button class="btn btn-primary" type="submit">Aplicar filtros</button>
+        <a class="btn btn-secondary" href="{{ url_for('dashboard_recorrencia') if recurring_only else url_for('dashboard') }}">Limpar</a>
+        <a class="btn btn-secondary" href="{{ url_for('dashboard') }}">Tabela geral</a>
+        <a class="btn btn-secondary" href="{{ url_for('dashboard_recorrencia') }}">Somente recorrencia</a>
+        <a class="btn btn-secondary" href="{{ export_url }}">Exportar Excel filtrado</a>
+      </div>
+    </form>
+  </article>
+
+  <article class="panel full-span">
+    <div class="stats-grid">
+      <div class="metric-card">
+        <p>Parcelas filtradas</p>
+        <strong>{{ totals.count_installments }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Previsto (valor)</p>
+        <strong>{{ totals.projected_value|currency }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Previsto (comissao)</p>
+        <strong>{{ totals.projected_commission|currency }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Confirmado (comissao)</p>
+        <strong>{{ totals.confirmed_commission|currency }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Cancelado (comissao)</p>
+        <strong>{{ totals.canceled_commission|currency }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Atrasado (comissao)</p>
+        <strong>{{ totals.overdue_commission|currency }}</strong>
+      </div>
+    </div>
+
+    <div class="charts-grid">
+      <div class="chart-area"><canvas id="chart-monthly" height="110"></canvas></div>
+      <div class="chart-area"><canvas id="chart-yearly" height="110"></canvas></div>
+      <div class="chart-area"><canvas id="chart-course" height="110"></canvas></div>
+    </div>
+  </article>
+
+  {% if can_write %}
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>{{ 'Editar venda' if sale_form.sale_id else 'Nova venda' }}</h2>
+      <span class="section-badge">A vista / Parcelado / Recorrencia</span>
+    </div>
+    <form method="post" action="{{ url_for('save_sale') }}" id="sale-form" class="grid-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="sale_id" value="{{ sale_form.sale_id }}">
+      <input type="hidden" name="return_to" value="{{ current_path }}">
+
+      <label>
+        Nome do cliente
+        <input type="text" name="customer_name" list="customer-list" value="{{ sale_form.customer_name }}" required>
+      </label>
+      <label>
+        Telefone
+        <input type="tel" inputmode="tel" name="customer_phone" value="{{ sale_form.customer_phone }}" placeholder="+1 415 555 2671">
+      </label>
+      <label>
+        Email
+        <input type="email" name="customer_email" value="{{ sale_form.customer_email }}" placeholder="cliente@email.com">
+      </label>
+      <label>
+        Data da venda
+        <input type="date" name="sale_date" value="{{ sale_form.sale_date }}" required>
+      </label>
+      <label>
+        Empresa
+        <select id="company-select" name="company_id" required>
+          <option value="">Selecione</option>
+          {% for company in companies %}
+          <option value="{{ company.id }}" {% if sale_form.company_id == company.id %}selected{% endif %}>{{ company.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Curso
+        <select id="course-select" name="course_id" required>
+          <option value="">Selecione</option>
+          {% for course in courses %}
+          <option
+            value="{{ course.id }}"
+            data-company-id="{{ course.company_id }}"
+            data-default-commission="{{ course.default_commission_percent }}"
+            {% if sale_form.course_id == course.id %}selected{% endif %}
+          >
+            {{ course.company_name }} - {{ course.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Formato de pagamento
+        <select id="payment-format" name="payment_format" required>
+          {% for key, label in payment_formats.items() %}
+          <option value="{{ key }}" {% if sale_form.payment_format == key %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Parcelas
+        <input id="installments-count" type="number" name="installments_count" min="1" value="{{ sale_form.installments_count }}" required>
+      </label>
+      <label>
+        Valor total da venda
+        <input id="total-value" type="number" step="0.01" min="0.01" name="total_value" value="{{ sale_form.total_value }}" required>
+      </label>
+      <label>
+        Comissao (%)
+        <input id="commission-percent" type="number" step="0.01" min="0" max="100" name="commission_percent" value="{{ sale_form.commission_percent }}" required>
+      </label>
+      {% if current_user.role == 'admin' %}
+      <label>
+        Vendedor responsavel
+        <select name="seller_id" required>
+          <option value="">Selecione</option>
+          {% for seller in sellers %}
+          <option value="{{ seller.id }}" {% if sale_form.seller_id == seller.id %}selected{% endif %}>{{ seller.full_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      <label class="full">
+        Observacoes
+        <textarea name="notes" rows="3">{{ sale_form.notes }}</textarea>
+      </label>
+
+      <div class="inline-metric full">
+        <span>Comissao prevista por parcela:</span>
+        <strong id="commission-preview">R$ 0,00</strong>
+      </div>
+
+      <div class="actions full">
+        <button class="btn btn-primary" type="submit">{{ 'Atualizar venda' if sale_form.sale_id else 'Salvar venda' }}</button>
+        <a class="btn btn-secondary" href="{{ url_for('dashboard') }}">Limpar</a>
+      </div>
+    </form>
+    <datalist id="customer-list">
+      {% for name in customer_names %}<option value="{{ name }}"></option>{% endfor %}
+    </datalist>
+  </article>
+  {% endif %}
+
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>{{ 'Tabela de recorrencia' if recurring_only else 'Tabela geral de vendas e parcelas' }}</h2>
+      <span class="section-badge">Detalhamento</span>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Data venda</th>
+            <th>Vencimento</th>
+            <th>Mes</th>
+            <th>Cliente</th>
+            <th>Telefone</th>
+            <th>Email</th>
+            <th>Empresa</th>
+            <th>Curso</th>
+            <th>Vendedor</th>
+            <th>Pagamento</th>
+            <th>Parcela</th>
+            <th>Valor</th>
+            <th>Comissao</th>
+            <th>Status pagamento</th>
+            <th>Acoes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if rows %}
+            {% for row in rows %}
+            <tr>
+              <td>{{ row.sale_date|date_br }}</td>
+              <td>{{ row.due_date|date_br }}</td>
+              <td>{{ row.month_key|month_br }}</td>
+              <td>{{ row.customer_name }}</td>
+              <td>{{ row.customer_phone or '-' }}</td>
+              <td>{{ row.customer_email or '-' }}</td>
+              <td>{{ row.company_name }}</td>
+              <td>{{ row.course_name }}</td>
+              <td>{{ row.seller_name }}</td>
+              <td>{{ payment_formats[row.payment_format] }}</td>
+              <td>{{ row.installment_number }}/{{ row.installments_count }}</td>
+              <td>{{ row.installment_value|currency }}</td>
+              <td>{{ row.commission_value|currency }} ({{ row.commission_percent }}%)</td>
+              <td>{{ installment_statuses[row.installment_status] }}</td>
+              <td>
+                {% if can_write and row.can_edit %}
+                <div class="row-actions">
+                  <a class="mini-btn" href="{{ url_for('dashboard_recorrencia' if recurring_only else 'dashboard', edit_sale=row.sale_id) }}">Editar venda</a>
+                  <form method="post" action="{{ url_for('delete_sale', sale_id=row.sale_id) }}" onsubmit="return confirm('Excluir a venda e todas as parcelas?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="mini-btn delete" type="submit">Excluir</button>
+                  </form>
+                  <form method="post" action="{{ url_for('update_installment_status', installment_id=row.installment_id) }}" class="inline-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <select name="status">
+                      {% for key, label in installment_statuses.items() %}
+                      <option value="{{ key }}" {% if row.installment_status == key %}selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                    <button class="mini-btn" type="submit">Atualizar</button>
+                  </form>
+                </div>
+                {% else %}
+                <span class="muted">Somente leitura</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="15" class="muted">Sem dados para os filtros atuais.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+
+<script id="chart-data" type="application/json">{{ charts | tojson }}</script>
+{% endblock %}

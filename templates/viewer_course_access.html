@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Meus Cursos | Comissionamento{% endblock %}
+
+{% block content %}
+<section class="layout">
+  <article class="panel">
+    <div class="section-title-row">
+      <h2>Solicitar acesso a curso</h2>
+      <span class="section-badge">Visualizador</span>
+    </div>
+    <form method="post" class="grid-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>
+        Curso
+        <select name="course_id" required>
+          <option value="">Selecione</option>
+          {% for course in courses %}
+          <option value="{{ course.id }}">{{ course.company_name }} - {{ course.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="full">
+        Observacao da solicitacao (opcional)
+        <textarea name="request_note" rows="3" placeholder="Motivo da solicitacao"></textarea>
+      </label>
+      <button class="btn btn-primary" type="submit">Enviar solicitacao</button>
+    </form>
+  </article>
+
+  <article class="panel full-span">
+    <div class="section-title-row"><h2>Acessos ativos</h2></div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Empresa</th><th>Curso</th><th>Validade</th></tr></thead>
+        <tbody>
+          {% if active_accesses %}
+            {% for access in active_accesses %}
+            <tr>
+              <td>{{ access.company_name }}</td>
+              <td>{{ access.course_name }}</td>
+              <td>{% if access.is_permanent %}Perpetuo{% else %}{{ access.expires_at|date_br }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="3" class="muted">Sem acesso ativo no momento.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="panel full-span">
+    <div class="section-title-row"><h2>Historico de solicitacoes</h2></div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Data</th><th>Empresa</th><th>Curso</th><th>Status</th><th>Validade</th><th>Observacao</th></tr></thead>
+        <tbody>
+          {% if requests %}
+            {% for req in requests %}
+            <tr>
+              <td>{{ req.requested_at }}</td>
+              <td>{{ req.company_name }}</td>
+              <td>{{ req.course_name }}</td>
+              <td>{{ req.status }}</td>
+              <td>
+                {% if req.status == 'aprovado' %}
+                  {% if req.is_permanent %}Perpetuo{% elif req.approval_days %}{{ req.approval_days }} dias{% else %}-{% endif %}
+                {% else %}-{% endif %}
+              </td>
+              <td>{{ req.request_note or '-' }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="6" class="muted">Sem solicitacoes registradas.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

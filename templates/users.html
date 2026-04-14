@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Usuarios | Comissionamento{% endblock %}
+
+{% block content %}
+<section class="layout">
+  <article class="panel">
+    <div class="section-title-row">
+      <h2>Novo usuario</h2>
+      <span class="section-badge">Admin</span>
+    </div>
+    <form method="post" class="grid-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="create">
+      <label>Usuario (sem espacos)<input type="text" name="username" required></label>
+      <label>Nome completo<input type="text" name="full_name" required></label>
+      <label>
+        Perfil
+        <select name="role" required>
+          <option value="admin">Administrador</option>
+          <option value="seller">Vendedor</option>
+          <option value="viewer">Visualizador</option>
+        </select>
+      </label>
+      <label>Senha<input type="password" name="password" required></label>
+      <label>Confirmar senha<input type="password" name="password_confirm" required></label>
+      <button class="btn btn-primary" type="submit">Criar usuario</button>
+    </form>
+  </article>
+
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Usuarios cadastrados</h2>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Nome</th><th>Usuario</th><th>Perfil</th><th>Status</th><th>Acoes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for user in users %}
+          <tr>
+            <td>{{ user.full_name }}</td>
+            <td>{{ user.username }}</td>
+            <td>{{ role_labels[user.role] }}</td>
+            <td>{{ 'Ativo' if user.is_active else 'Inativo' }}</td>
+            <td>
+              <div class="row-actions">
+                <form method="post" class="inline-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="update_role">
+                  <input type="hidden" name="user_id" value="{{ user.id }}">
+                  <select name="role">
+                    <option value="admin" {% if user.role == 'admin' %}selected{% endif %}>Administrador</option>
+                    <option value="seller" {% if user.role == 'seller' %}selected{% endif %}>Vendedor</option>
+                    <option value="viewer" {% if user.role == 'viewer' %}selected{% endif %}>Visualizador</option>
+                  </select>
+                  <button class="mini-btn" type="submit">Perfil</button>
+                </form>
+                <form method="post" class="inline-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="toggle_active">
+                  <input type="hidden" name="user_id" value="{{ user.id }}">
+                  <button class="mini-btn" type="submit">{{ 'Desativar' if user.is_active else 'Ativar' }}</button>
+                </form>
+                <form method="post" class="inline-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="reset_password">
+                  <input type="hidden" name="user_id" value="{{ user.id }}">
+                  <input type="password" name="new_password" placeholder="Nova senha" required>
+                  <button class="mini-btn" type="submit">Trocar senha</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

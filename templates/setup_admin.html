@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Criar Admin | Comissionamento{% endblock %}
+
+{% block content %}
+<section class="panel auth-panel">
+  <h2>Configuracao Inicial</h2>
+  <p class="muted">Crie o primeiro usuario administrador.</p>
+  <form method="post" class="grid-form auth-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>
+      Usuario
+      <input type="text" name="username" placeholder="admin (sem espacos)" required>
+    </label>
+    <label>
+      Nome completo
+      <input type="text" name="full_name" required>
+    </label>
+    <label>
+      Senha
+      <input type="password" name="password" required>
+    </label>
+    <label>
+      Confirmar senha
+      <input type="password" name="password_confirm" required>
+    </label>
+    <button class="btn btn-primary" type="submit">Criar administrador</button>
+  </form>
+</section>
+{% endblock %}

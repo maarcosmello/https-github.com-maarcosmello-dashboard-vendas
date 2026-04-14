@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Solicitacoes de Curso | Comissionamento{% endblock %}
+
+{% block content %}
+<section class="panel full-span">
+  <div class="section-title-row">
+    <h2>Solicitacoes de acesso (visualizadores)</h2>
+    <span class="section-badge">Admin</span>
+  </div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Data</th>
+          <th>Usuario</th>
+          <th>Empresa</th>
+          <th>Curso</th>
+          <th>Status</th>
+          <th>Obs.</th>
+          <th>Acoes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if requests %}
+          {% for req in requests %}
+          <tr>
+            <td>{{ req.requested_at }}</td>
+            <td>{{ req.viewer_name }} ({{ req.viewer_username }})</td>
+            <td>{{ req.company_name }}</td>
+            <td>{{ req.course_name }}</td>
+            <td>{{ req.status }}</td>
+            <td>{{ req.request_note or '-' }}</td>
+            <td>
+              {% if req.status == 'pendente' %}
+              <div class="row-actions">
+                <form method="post" class="inline-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="approve">
+                  <input type="hidden" name="request_id" value="{{ req.id }}">
+                  <input type="number" name="approval_days" min="1" placeholder="dias" style="width:90px;">
+                  <label style="display:flex;align-items:center;gap:4px;">
+                    <input type="checkbox" name="is_permanent" value="1" style="width:auto;"> Perpetuo
+                  </label>
+                  <button class="mini-btn" type="submit">Aprovar</button>
+                </form>
+                <form method="post" class="inline-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="deny">
+                  <input type="hidden" name="request_id" value="{{ req.id }}">
+                  <button class="mini-btn delete" type="submit">Recusar</button>
+                </form>
+              </div>
+              {% else %}
+              <span class="muted">Ja analisada</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="7" class="muted">Sem solicitacoes.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
