@@ -14,20 +14,11 @@
       <input type="hidden" name="action" value="create">
       <label>Nome da comunidade<input type="text" name="name" required></label>
       <label>
-        Administrador da comunidade
+        Admin responsável
         <select name="owner_admin_id" required>
           <option value="">Selecione</option>
           {% for admin in community_admins %}
-          <option value="{{ admin.id }}">{{ admin.full_name }} ({{ admin.username }})</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>
-        Gestor principal (opcional)
-        <select name="manager_user_id">
-          <option value="">Sem gestor principal</option>
-          {% for manager in managers %}
-          <option value="{{ manager.id }}">{{ manager.full_name }}</option>
+          <option value="{{ admin.id }}">{{ admin.full_name }} ({{ admin.username }}){% if admin.is_master %} - Mestre{% endif %}</option>
           {% endfor %}
         </select>
       </label>
@@ -45,7 +36,7 @@
           <tr>
             <th>Comunidade</th>
             <th>Admin</th>
-            <th>Gestor principal</th>
+            <th>Responsável comercial</th>
             <th>Status</th>
             <th>Ações</th>
           </tr>
@@ -59,29 +50,25 @@
               <td>{{ community.manager_name or '-' }}</td>
               <td>{{ 'Ativa' if community.is_active else 'Inativa' }}</td>
               <td>
-                <div class="row-actions">
-                  <form method="post" class="inline-form">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="hidden" name="action" value="update">
-                    <input type="hidden" name="community_id" value="{{ community.id }}">
-                    <input type="text" name="name" value="{{ community.name }}" required>
-                    <select name="manager_user_id">
-                      <option value="">Sem gestor principal</option>
-                      {% for manager in managers %}
-                      <option value="{{ manager.id }}" {% if community.manager_user_id == manager.id %}selected{% endif %}>
-                        {{ manager.full_name }}
-                      </option>
-                      {% endfor %}
-                    </select>
-                    <button class="mini-btn" type="submit">Atualizar</button>
-                  </form>
-                  <form method="post" class="inline-form">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="hidden" name="action" value="toggle_active">
-                    <input type="hidden" name="community_id" value="{{ community.id }}">
-                    <button class="mini-btn" type="submit">{{ 'Desativar' if community.is_active else 'Ativar' }}</button>
-                  </form>
-                </div>
+                <form method="post" class="row-actions">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="save_changes">
+                  <input type="hidden" name="community_id" value="{{ community.id }}">
+                  <input type="text" name="name" value="{{ community.name }}" required>
+                  <select name="manager_user_id">
+                    <option value="">Sem responsável comercial</option>
+                    {% for manager in managers %}
+                    <option value="{{ manager.id }}" {% if community.manager_user_id == manager.id %}selected{% endif %}>
+                      {{ manager.full_name }}
+                    </option>
+                    {% endfor %}
+                  </select>
+                  <select name="is_active">
+                    <option value="1" {% if community.is_active %}selected{% endif %}>Ativa</option>
+                    <option value="0" {% if not community.is_active %}selected{% endif %}>Inativa</option>
+                  </select>
+                  <button class="mini-btn" type="submit">Salvar alterações</button>
+                </form>
               </td>
             </tr>
             {% endfor %}

@@ -13,10 +13,10 @@
     <form method="post" class="grid-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="action" value="create_admin">
-      <label>Usuário (máx. 8)<input type="text" name="username" maxlength="8" required></label>
+      <label>Usuário (3 a 8)<input type="text" name="username" minlength="3" maxlength="8" required></label>
       <label>Nome completo<input type="text" name="full_name" required></label>
-      <label>Senha inicial (máx. 8)<input type="password" name="password" maxlength="8" required></label>
-      <label>Confirmar senha<input type="password" name="password_confirm" maxlength="8" required></label>
+      <label>Senha inicial (3 a 8)<input type="password" name="password" minlength="3" maxlength="8" required></label>
+      <label>Confirmar senha<input type="password" name="password_confirm" minlength="3" maxlength="8" required></label>
       <button class="btn btn-primary" type="submit">Criar admin da comunidade</button>
     </form>
   </article>
@@ -30,19 +30,29 @@
     <form method="post" class="grid-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="action" value="create_request">
-      <label>Usuário (sem espaços)<input type="text" name="username" maxlength="8" required></label>
+      <label>Usuário<input type="text" name="username" minlength="3" maxlength="8" required></label>
       <label>Nome completo<input type="text" name="full_name" required></label>
       <label>
         Perfil solicitado
         <select name="desired_profile" required>
-          <option value="manager">Gestor</option>
           <option value="seller">Vendedor</option>
           <option value="viewer">Visualizador</option>
         </select>
       </label>
-      <label>Usuário de indicação (admin ou gestor)<input type="text" name="invite_username" maxlength="8" required></label>
-      <label>Senha inicial<input type="password" name="password" maxlength="8" required></label>
-      <label>Confirmar senha<input type="password" name="password_confirm" maxlength="8" required></label>
+      <label>Usuário de indicação (admin ou mestre)<input type="text" name="invite_username" minlength="3" maxlength="8" required></label>
+      {% if actor_is_master %}
+      <label>
+        Comunidade de destino (quando indicação for mestre)
+        <select name="preferred_owner_admin_id">
+          <option value="">Padrão (primeira comunidade ativa)</option>
+          {% for admin in community_admins %}
+          <option value="{{ admin.id }}">{{ admin.full_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      <label>Senha inicial<input type="password" name="password" minlength="3" maxlength="8" required></label>
+      <label>Confirmar senha<input type="password" name="password_confirm" minlength="3" maxlength="8" required></label>
       <button class="btn btn-primary" type="submit">Enviar solicitação</button>
     </form>
     <p class="muted small">
@@ -111,8 +121,6 @@
                 Administrador Mestre
               {% elif user.role == 'admin' %}
                 Administrador
-              {% elif user.role == 'seller' and user.is_manager %}
-                Gestor
               {% elif user.role == 'seller' %}
                 Vendedor
               {% else %}
@@ -123,42 +131,31 @@
             <td>{{ user.owner_admin_name or ('Própria' if user.role == 'admin' and not user.is_master else '-') }}</td>
             <td>{{ 'Ativo' if user.is_active else 'Inativo' }}</td>
             <td>
-              <div class="row-actions">
+              <form method="post" class="row-actions">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="save_user_changes">
+                <input type="hidden" name="user_id" value="{{ user.id }}">
                 {% if actor_is_master %}
-                  <form method="post" class="inline-form">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="hidden" name="action" value="update_hierarchy">
-                    <input type="hidden" name="user_id" value="{{ user.id }}">
-                    <select name="profile">
-                      <option value="master" {% if user.role == 'admin' and user.is_master %}selected{% endif %}>Administrador Mestre</option>
-                      <option value="admin" {% if user.role == 'admin' and not user.is_master %}selected{% endif %}>Administrador</option>
-                      <option value="manager" {% if user.role == 'seller' and user.is_manager %}selected{% endif %}>Gestor</option>
-                      <option value="seller" {% if user.role == 'seller' and not user.is_manager %}selected{% endif %}>Vendedor</option>
-                      <option value="viewer" {% if user.role == 'viewer' %}selected{% endif %}>Visualizador</option>
-                    </select>
-                    <select name="community_admin_id">
-                      <option value="">Comunidade</option>
-                      {% for admin in community_admins %}
-                      <option value="{{ admin.id }}" {% if user.owner_admin_id == admin.id %}selected{% endif %}>{{ admin.full_name }}</option>
-                      {% endfor %}
-                    </select>
-                    <button class="mini-btn" type="submit">Hierarquia</button>
-                  </form>
+                <select name="profile">
+                  <option value="master" {% if user.role == 'admin' and user.is_master %}selected{% endif %}>Administrador Mestre</option>
+                  <option value="admin" {% if user.role == 'admin' and not user.is_master %}selected{% endif %}>Administrador</option>
+                  <option value="seller" {% if user.role == 'seller' %}selected{% endif %}>Vendedor</option>
+                  <option value="viewer" {% if user.role == 'viewer' %}selected{% endif %}>Visualizador</option>
+                </select>
+                <select name="community_admin_id">
+                  <option value="">Comunidade</option>
+                  {% for admin in community_admins %}
+                  <option value="{{ admin.id }}" {% if user.owner_admin_id == admin.id %}selected{% endif %}>{{ admin.full_name }}</option>
+                  {% endfor %}
+                </select>
                 {% endif %}
-                <form method="post" class="inline-form">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <input type="hidden" name="action" value="toggle_active">
-                  <input type="hidden" name="user_id" value="{{ user.id }}">
-                  <button class="mini-btn" type="submit">{{ 'Desativar' if user.is_active else 'Ativar' }}</button>
-                </form>
-                <form method="post" class="inline-form">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <input type="hidden" name="action" value="reset_password">
-                  <input type="hidden" name="user_id" value="{{ user.id }}">
-                  <input type="password" name="new_password" maxlength="8" placeholder="Nova senha" required>
-                  <button class="mini-btn" type="submit">Trocar senha</button>
-                </form>
-              </div>
+                <select name="is_active">
+                  <option value="1" {% if user.is_active %}selected{% endif %}>Ativo</option>
+                  <option value="0" {% if not user.is_active %}selected{% endif %}>Inativo</option>
+                </select>
+                <input type="password" name="new_password" minlength="3" maxlength="8" placeholder="Nova senha (opcional)">
+                <button class="mini-btn" type="submit">Salvar alterações</button>
+              </form>
             </td>
           </tr>
           {% endfor %}
