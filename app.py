@@ -4,6 +4,7 @@ import random
 import re
 import sqlite3
 import string
+import tempfile
 import time
 from datetime import date, datetime, timedelta
 from functools import wraps
@@ -265,11 +266,37 @@ def database_needs_reset(db_path):
         return False
     try:
         conn = sqlite3.connect(db_path)
-        conn.execute("SELECT 1").fetchone()
+        # quick_check força leitura real do arquivo SQLite e detecta corrupção/trava de I/O.
+        check = conn.execute("PRAGMA quick_check").fetchone()
         conn.close()
+        if check and str(check[0]).lower() != "ok":
+            return True
         return False
     except sqlite3.Error:
         return True
+
+
+def quarantine_broken_db(db_path):
+    if not os.path.exists(db_path):
+        return
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    db_dir = os.path.dirname(db_path) or DATA_DIR
+    db_name = os.path.splitext(os.path.basename(db_path))[0]
+    os.makedirs(db_dir, exist_ok=True)
+
+    backup_db = os.path.join(db_dir, f"{db_name}_legacy_{timestamp}.db")
+    try:
+        os.replace(db_path, backup_db)
+    except OSError:
+        pass
+
+    for suffix in ("-journal", "-wal", "-shm"):
+        sidecar = f"{db_path}{suffix}"
+        if os.path.exists(sidecar):
+            try:
+                os.remove(sidecar)
+            except OSError:
+                pass
 
 
 def ensure_column(conn, table_name, column_name, definition_sql):
@@ -622,27 +649,24 @@ def bootstrap_multitenant_data(conn):
         )
 
 
-def init_db():
+def initialize_database_file(db_path):
+    db_dir = os.path.dirname(db_path) or DATA_DIR
+    os.makedirs(db_dir, exist_ok=True)
     os.makedirs(DATA_DIR, exist_ok=True)
     legacy_users = []
 
-    if database_needs_reset(DB_PATH):
+    if database_needs_reset(db_path):
         try:
-            legacy_users = read_legacy_users(DB_PATH)
+            legacy_users = read_legacy_users(db_path)
         except sqlite3.Error:
             legacy_users = []
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = os.path.join(DATA_DIR, f"commission_legacy_{timestamp}.db")
-        try:
-            os.replace(DB_PATH, backup_path)
-        except OSError:
-            # If the file is locked by OS sync/service, keep current DB and let migrations try.
-            legacy_users = []
+        quarantine_broken_db(db_path)
 
     retryable_errors = ("database is locked", "disk i/o error", "unable to open database file")
     last_error = None
+    recovery_attempted = False
     for attempt in range(3):
-        conn = sqlite3.connect(DB_PATH, timeout=15)
+        conn = sqlite3.connect(db_path, timeout=15)
         try:
             conn.executescript(SCHEMA_SQL)
             apply_schema_migrations(conn)
@@ -655,6 +679,16 @@ def init_db():
         except sqlite3.OperationalError as exc:
             last_error = exc
             msg = str(exc).lower()
+            if any(token in msg for token in retryable_errors) and not recovery_attempted:
+                recovery_attempted = True
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                quarantine_broken_db(db_path)
+                legacy_users = []
+                time.sleep(0.6)
+                continue
             if any(token in msg for token in retryable_errors) and attempt < 2:
                 time.sleep(0.8 * (attempt + 1))
                 continue
@@ -663,6 +697,26 @@ def init_db():
             conn.close()
     if last_error:
         raise last_error
+
+
+def init_db():
+    app.config["DATABASE"] = DB_PATH
+    try:
+        initialize_database_file(DB_PATH)
+        return
+    except sqlite3.OperationalError as exc:
+        msg = str(exc).lower()
+        retryable_errors = ("database is locked", "disk i/o error", "unable to open database file")
+        if not any(token in msg for token in retryable_errors):
+            raise
+
+    fallback_path = os.environ.get(
+        "DATABASE_FALLBACK_PATH",
+        os.path.join(tempfile.gettempdir(), "dashboard_vendas_fallback.db"),
+    )
+    print(f"[init_db] Banco principal indisponível ({DB_PATH}). Usando fallback em: {fallback_path}")
+    app.config["DATABASE"] = fallback_path
+    initialize_database_file(fallback_path)
 
 
 def read_legacy_users(db_path):
