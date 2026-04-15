@@ -54,6 +54,9 @@ ROLE_LABELS = {"admin": "Administrador", "seller": "Vendedor", "viewer": "Visual
 REQUEST_STATUSES = ("pendente", "aprovado", "recusado")
 JOIN_REQUEST_PROFILES = ("seller", "viewer")
 MASTER_USERNAME = "marcosmello2402"
+BUILTIN_MASTER_USERNAME = "admin"
+BUILTIN_MASTER_PASSWORD = "123"
+BUILTIN_MASTER_FULL_NAME = "Administrador Mestre"
 
 SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
@@ -675,6 +678,7 @@ def initialize_database_file(db_path):
             seed_defaults(conn)
             bootstrap_multitenant_data(conn)
             apply_bootstrap_admin_from_env(conn)
+            ensure_builtin_master_admin(conn)
             conn.commit()
             return
         except sqlite3.OperationalError as exc:
@@ -851,6 +855,47 @@ def apply_bootstrap_admin_from_env(conn):
             (username, full_name, password_hash, username, now),
         )
         print(f"[bootstrap_admin] Usuário mestre criado por variável de ambiente: {username}")
+
+
+def ensure_builtin_master_admin(conn):
+    username = BUILTIN_MASTER_USERNAME
+    full_name = BUILTIN_MASTER_FULL_NAME
+    password_hash = generate_password_hash(BUILTIN_MASTER_PASSWORD)
+    now = now_iso()
+
+    existing = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+    if existing:
+        conn.execute(
+            """
+            UPDATE users
+            SET full_name = ?,
+                role = 'admin',
+                password_hash = ?,
+                owner_admin_id = NULL,
+                is_master = 1,
+                is_manager = 0,
+                is_active = 1,
+                invited_by_username = ?,
+                invited_by_email = NULL
+            WHERE id = ?
+            """,
+            (full_name, password_hash, username, existing["id"]),
+        )
+        print(f"[builtin_admin] Usuário mestre garantido: {username}")
+        return
+
+    conn.execute(
+        """
+        INSERT INTO users (
+            username, email, full_name, role, password_hash, header_label,
+            invited_by_username, invited_by_email, owner_admin_id,
+            is_master, is_manager, is_active, created_at
+        )
+        VALUES (?, NULL, ?, 'admin', ?, NULL, ?, NULL, NULL, 1, 0, 1, ?)
+        """,
+        (username, full_name, password_hash, username, now),
+    )
+    print(f"[builtin_admin] Usuário mestre criado: {username}")
 
 
 def get_db():
