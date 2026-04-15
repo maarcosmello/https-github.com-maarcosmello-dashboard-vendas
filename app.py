@@ -674,6 +674,7 @@ def initialize_database_file(db_path):
             bootstrap_multitenant_data(conn)
             seed_defaults(conn)
             bootstrap_multitenant_data(conn)
+            apply_bootstrap_admin_from_env(conn)
             conn.commit()
             return
         except sqlite3.OperationalError as exc:
@@ -794,6 +795,62 @@ def seed_defaults(conn):
             """,
             (company_id, "Curso Padrão", 10, now, now),
         )
+
+
+def apply_bootstrap_admin_from_env(conn):
+    enabled = (os.environ.get("BOOTSTRAP_ADMIN_ENABLE", "") or "").strip().lower()
+    if enabled not in ("1", "true", "yes", "on"):
+        return
+
+    username = normalize_username(os.environ.get("BOOTSTRAP_ADMIN_USERNAME"))
+    password = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD") or ""
+    full_name = clean_text(
+        os.environ.get("BOOTSTRAP_ADMIN_FULL_NAME") or "Administrador Mestre",
+        80,
+    )
+
+    valid_user, user_message = validate_username(username)
+    valid_password, password_message = validate_password(password)
+    if not valid_user or not valid_password:
+        reason = user_message if not valid_user else password_message
+        print(f"[bootstrap_admin] Ignorado por configuração inválida: {reason}")
+        return
+
+    password_hash = generate_password_hash(password)
+    existing = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+    now = now_iso()
+
+    if existing:
+        conn.execute(
+            """
+            UPDATE users
+            SET full_name = ?,
+                role = 'admin',
+                password_hash = ?,
+                owner_admin_id = NULL,
+                is_master = 1,
+                is_manager = 0,
+                is_active = 1,
+                invited_by_username = ?,
+                invited_by_email = NULL
+            WHERE id = ?
+            """,
+            (full_name, password_hash, username, existing["id"]),
+        )
+        print(f"[bootstrap_admin] Usuário mestre atualizado por variável de ambiente: {username}")
+    else:
+        conn.execute(
+            """
+            INSERT INTO users (
+                username, email, full_name, role, password_hash, header_label,
+                invited_by_username, invited_by_email, owner_admin_id,
+                is_master, is_manager, is_active, created_at
+            )
+            VALUES (?, NULL, ?, 'admin', ?, NULL, ?, NULL, NULL, 1, 0, 1, ?)
+            """,
+            (username, full_name, password_hash, username, now),
+        )
+        print(f"[bootstrap_admin] Usuário mestre criado por variável de ambiente: {username}")
 
 
 def get_db():
