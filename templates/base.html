@@ -30,6 +30,8 @@
         </span>
         <a class="mini-link {% if current_ep in ['dashboard'] %}active{% endif %}" href="{{ url_for('dashboard') }}">Dashboard</a>
         <a class="mini-link {% if current_ep in ['dashboard_recorrencia'] %}active{% endif %}" href="{{ url_for('dashboard_recorrencia') }}">Recorrência</a>
+        <a class="mini-link {% if current_ep in ['dashboard_comissionamento'] %}active{% endif %}" href="{{ url_for('dashboard_comissionamento') }}">Comissionamento</a>
+        <a class="mini-link" href="{{ url_for('download_manual_usuario') }}">Manual do Usuário</a>
         {% if current_user.role == 'viewer' %}
         <a class="mini-link {% if current_ep in ['viewer_course_access'] %}active{% endif %}" href="{{ url_for('viewer_course_access') }}">Meus Cursos</a>
         {% endif %}

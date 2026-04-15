@@ -34,6 +34,10 @@ except ImportError:
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 DB_PATH = os.environ.get("DATABASE_PATH", os.path.join(DATA_DIR, "commission.db"))
+MANUAL_PDF_PATH = os.environ.get(
+    "MANUAL_PDF_PATH",
+    os.path.join(BASE_DIR, "static", "manual", "Manual_do_Usuario_Dashboard_de_Vendas.pdf"),
+)
 
 PAYMENT_FORMATS = {
     "avista": "À vista",
@@ -1521,7 +1525,7 @@ def fetch_sellers(user=None):
         clause, clause_params = build_in_clause("COALESCE(NULLIF(owner_admin_id, 0), id)", owner_ids)
         sql += f" AND {clause}"
         params.extend(clause_params)
-    sql += " ORDER BY full_name COLLATE NOCASE ASC"
+    sql += " ORDER BY username COLLATE NOCASE ASC"
     return db.execute(sql, params).fetchall()
 
 
@@ -1618,6 +1622,7 @@ def fetch_communities(user=None, include_inactive=True):
 def parse_filters(args, user):
     filters = {
         "sale_date_start": "",
+        "sale_date_end": "",
         "company_id": None,
         "course_id": None,
         "seller_id": None,
@@ -1633,6 +1638,12 @@ def parse_filters(args, user):
     if start_sale:
         try:
             filters["sale_date_start"] = parse_date(start_sale, "Data da venda")
+        except ValueError:
+            pass
+    end_sale = (args.get("sale_date_end") or "").strip()
+    if end_sale:
+        try:
+            filters["sale_date_end"] = parse_date(end_sale, "Data final da venda")
         except ValueError:
             pass
 
@@ -1667,6 +1678,16 @@ def parse_filters(args, user):
     except ValueError:
         filters["max_value"] = None
 
+    if (
+        filters["sale_date_start"]
+        and filters["sale_date_end"]
+        and filters["sale_date_start"] > filters["sale_date_end"]
+    ):
+        filters["sale_date_start"], filters["sale_date_end"] = (
+            filters["sale_date_end"],
+            filters["sale_date_start"],
+        )
+
     return filters
 
 
@@ -1674,6 +1695,7 @@ def filters_to_query(filters, user):
     query = {}
     for key in (
         "sale_date_start",
+        "sale_date_end",
         "company_id",
         "course_id",
         "seller_id",
@@ -1762,7 +1784,8 @@ def fetch_installment_rows(filters, user, recurring_only=False):
       comp.name AS company_name,
       c.id AS course_id,
       c.name AS course_name,
-      u.full_name AS seller_name
+      u.username AS seller_name,
+      u.full_name AS seller_full_name
     FROM sale_installments i
     INNER JOIN sales s ON s.id = i.sale_id
     INNER JOIN companies comp ON comp.id = s.company_id
@@ -1785,6 +1808,9 @@ def fetch_installment_rows(filters, user, recurring_only=False):
     if filters["sale_date_start"]:
         sql += " AND s.sale_date >= ?"
         params.append(filters["sale_date_start"])
+    if filters.get("sale_date_end"):
+        sql += " AND s.sale_date <= ?"
+        params.append(filters["sale_date_end"])
     if filters["company_id"]:
         sql += " AND s.company_id = ?"
         params.append(filters["company_id"])
@@ -1816,11 +1842,12 @@ def fetch_installment_rows(filters, user, recurring_only=False):
           OR lower(COALESCE(s.customer_phone, '')) LIKE lower(?)
           OR lower(comp.name) LIKE lower(?)
           OR lower(c.name) LIKE lower(?)
+          OR lower(u.username) LIKE lower(?)
           OR lower(u.full_name) LIKE lower(?)
           OR lower(COALESCE(s.notes, '')) LIKE lower(?)
         )
         """
-        params.extend([like, like, like, like, like, like])
+        params.extend([like, like, like, like, like, like, like])
 
     sql += " ORDER BY i.due_date DESC, i.installment_number DESC"
     rows = db.execute(sql, params).fetchall()
@@ -1998,6 +2025,238 @@ def validate_email(email, allow_empty=True):
     if not email:
         return allow_empty
     return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email))
+
+
+def parse_commission_filters(args, user):
+    filters = {
+        "sale_date_start": "",
+        "sale_date_end": "",
+        "seller_id": None,
+    }
+    start_sale = (args.get("sale_date_start") or "").strip()
+    if start_sale:
+        try:
+            filters["sale_date_start"] = parse_date(start_sale, "Data inicial da venda")
+        except ValueError:
+            pass
+    end_sale = (args.get("sale_date_end") or "").strip()
+    if end_sale:
+        try:
+            filters["sale_date_end"] = parse_date(end_sale, "Data final da venda")
+        except ValueError:
+            pass
+
+    # Vendedor enxerga sempre o próprio resultado.
+    if user["role"] == "seller":
+        filters["seller_id"] = user["id"]
+    elif user["role"] != "admin":
+        filters["seller_id"] = None
+    else:
+        try:
+            filters["seller_id"] = parse_int(args.get("seller_id"), "Vendedor", allow_empty=True)
+        except ValueError:
+            filters["seller_id"] = None
+
+    if (
+        filters["sale_date_start"]
+        and filters["sale_date_end"]
+        and filters["sale_date_start"] > filters["sale_date_end"]
+    ):
+        # Mantém o período sempre válido para o usuário.
+        filters["sale_date_start"], filters["sale_date_end"] = (
+            filters["sale_date_end"],
+            filters["sale_date_start"],
+        )
+    return filters
+
+
+def build_sales_scope_where(user, sale_alias="s"):
+    if is_master_user(user):
+        return "1=1", []
+    owner_ids = get_user_scope_owner_ids(user)
+    return build_in_clause(f"{sale_alias}.owner_admin_id", owner_ids)
+
+
+def fetch_commission_dashboard_data(user, filters):
+    db = get_db()
+    scope_clause, scope_params = build_sales_scope_where(user, "s")
+
+    where = [scope_clause]
+    params = list(scope_params)
+    if filters["sale_date_start"]:
+        where.append("s.sale_date >= ?")
+        params.append(filters["sale_date_start"])
+    if filters["sale_date_end"]:
+        where.append("s.sale_date <= ?")
+        params.append(filters["sale_date_end"])
+    if filters["seller_id"]:
+        where.append("s.seller_id = ?")
+        params.append(filters["seller_id"])
+    where_sql = " AND ".join(where) if where else "1=1"
+
+    summary = db.execute(
+        f"""
+        SELECT
+          COUNT(*) AS sales_count,
+          COALESCE(SUM(s.total_value), 0) AS total_revenue,
+          COALESCE(SUM(s.total_commission_expected), 0) AS total_commission_expected,
+          COALESCE(SUM(CASE WHEN s.payment_format = 'recorrencia' THEN 1 ELSE 0 END), 0) AS recurring_sales_count
+        FROM sales s
+        WHERE {where_sql}
+        """,
+        params,
+    ).fetchone()
+
+    sales_rows = db.execute(
+        f"""
+        SELECT
+          s.id,
+          s.sale_date,
+          s.customer_name,
+          s.payment_format,
+          s.installments_count,
+          s.total_value,
+          s.total_commission_expected,
+          seller.id AS seller_id,
+          seller.username AS seller_username,
+          seller.full_name AS seller_full_name,
+          comp.name AS company_name,
+          c.name AS course_name
+        FROM sales s
+        INNER JOIN users seller ON seller.id = s.seller_id
+        INNER JOIN companies comp ON comp.id = s.company_id
+        INNER JOIN courses c ON c.id = s.course_id
+        WHERE {where_sql}
+        ORDER BY s.sale_date DESC, s.id DESC
+        """,
+        params,
+    ).fetchall()
+
+    rankings_courses = db.execute(
+        f"""
+        SELECT
+          c.id AS course_id,
+          c.name AS course_name,
+          comp.name AS company_name,
+          COUNT(*) AS sales_count,
+          COALESCE(SUM(s.total_value), 0) AS total_revenue,
+          COALESCE(SUM(s.total_commission_expected), 0) AS total_commission,
+          COALESCE(AVG(s.total_value), 0) AS avg_ticket,
+          COALESCE(MAX(s.total_value), 0) AS max_ticket
+        FROM sales s
+        INNER JOIN courses c ON c.id = s.course_id
+        INNER JOIN companies comp ON comp.id = s.company_id
+        WHERE {where_sql}
+        GROUP BY c.id, c.name, comp.name
+        ORDER BY total_revenue DESC, sales_count DESC, avg_ticket DESC
+        """,
+        params,
+    ).fetchall()
+
+    rankings_companies = db.execute(
+        f"""
+        SELECT
+          comp.id AS company_id,
+          comp.name AS company_name,
+          COUNT(*) AS sales_count,
+          COALESCE(SUM(s.total_value), 0) AS total_revenue,
+          COALESCE(SUM(s.total_commission_expected), 0) AS total_commission,
+          COALESCE(AVG(s.total_value), 0) AS avg_ticket,
+          COALESCE(MAX(s.total_value), 0) AS max_ticket
+        FROM sales s
+        INNER JOIN companies comp ON comp.id = s.company_id
+        WHERE {where_sql}
+        GROUP BY comp.id, comp.name
+        ORDER BY total_revenue DESC, sales_count DESC, avg_ticket DESC
+        """,
+        params,
+    ).fetchall()
+
+    ranking_sellers_where = [scope_clause]
+    ranking_sellers_params = list(scope_params)
+    if filters["sale_date_start"]:
+        ranking_sellers_where.append("s.sale_date >= ?")
+        ranking_sellers_params.append(filters["sale_date_start"])
+    if filters["sale_date_end"]:
+        ranking_sellers_where.append("s.sale_date <= ?")
+        ranking_sellers_params.append(filters["sale_date_end"])
+    ranking_sellers_sql = " AND ".join(ranking_sellers_where) if ranking_sellers_where else "1=1"
+    rankings_sellers = db.execute(
+        f"""
+        SELECT
+          seller.id AS seller_id,
+          seller.username AS seller_username,
+          seller.full_name AS seller_full_name,
+          COUNT(*) AS sales_count,
+          COALESCE(SUM(s.total_value), 0) AS total_revenue,
+          COALESCE(SUM(s.total_commission_expected), 0) AS total_commission,
+          COALESCE(AVG(s.total_value), 0) AS avg_ticket
+        FROM sales s
+        INNER JOIN users seller ON seller.id = s.seller_id
+        WHERE {ranking_sellers_sql}
+        GROUP BY seller.id, seller.username, seller.full_name
+        ORDER BY total_revenue DESC, sales_count DESC, avg_ticket DESC
+        """,
+        ranking_sellers_params,
+    ).fetchall()
+
+    monthly_rows = db.execute(
+        f"""
+        SELECT
+          i.month_key,
+          COALESCE(SUM(i.installment_value), 0) AS total_value,
+          COALESCE(SUM(i.commission_value), 0) AS total_commission,
+          COALESCE(SUM(CASE WHEN i.status = 'confirmado' THEN i.commission_value ELSE 0 END), 0) AS confirmed_commission,
+          COALESCE(SUM(CASE WHEN i.status = 'atrasado' THEN i.commission_value ELSE 0 END), 0) AS pending_or_overdue_commission,
+          COALESCE(SUM(CASE WHEN i.status = 'cancelado' THEN i.commission_value ELSE 0 END), 0) AS canceled_commission
+        FROM sale_installments i
+        INNER JOIN sales s ON s.id = i.sale_id
+        WHERE {where_sql}
+        GROUP BY i.month_key
+        ORDER BY i.month_key ASC
+        """,
+        params,
+    ).fetchall()
+
+    best_course_by_sales = rankings_courses[0] if rankings_courses else None
+    best_course_by_ticket = (
+        max(rankings_courses, key=lambda row: float(row["avg_ticket"])) if rankings_courses else None
+    )
+    favorite_company = None
+    if rankings_companies:
+        favorite_company = sorted(
+            rankings_companies,
+            key=lambda row: (int(row["sales_count"]), float(row["total_revenue"]), float(row["avg_ticket"])),
+            reverse=True,
+        )[0]
+
+    current_seller_rank = None
+    if rankings_sellers and user["role"] == "seller":
+        for idx, item in enumerate(rankings_sellers, start=1):
+            if item["seller_id"] == user["id"]:
+                current_seller_rank = idx
+                break
+
+    chart_payload = {
+        "monthly_labels": [month_to_label(row["month_key"]) for row in monthly_rows],
+        "monthly_commission": [round(float(row["total_commission"]), 2) for row in monthly_rows],
+        "monthly_confirmed_commission": [round(float(row["confirmed_commission"]), 2) for row in monthly_rows],
+        "monthly_total_value": [round(float(row["total_value"]), 2) for row in monthly_rows],
+    }
+
+    return {
+        "summary": summary,
+        "sales_rows": sales_rows,
+        "rankings_courses": rankings_courses,
+        "rankings_companies": rankings_companies,
+        "rankings_sellers": rankings_sellers,
+        "monthly_rows": monthly_rows,
+        "best_course_by_sales": best_course_by_sales,
+        "best_course_by_ticket": best_course_by_ticket,
+        "favorite_company": favorite_company,
+        "current_seller_rank": current_seller_rank,
+        "charts": chart_payload,
+    }
 
 
 @app.route("/")
@@ -2268,6 +2527,20 @@ def logout():
     return redirect(url_for("login"))
 
 
+@app.get("/manual-usuario")
+@login_required
+def download_manual_usuario():
+    if not os.path.isfile(MANUAL_PDF_PATH):
+        flash("Manual do usuário não encontrado.", "error")
+        return redirect(url_for("dashboard"))
+    return send_file(
+        MANUAL_PDF_PATH,
+        as_attachment=True,
+        download_name="Manual_do_Usuario_Dashboard_de_Vendas.pdf",
+        mimetype="application/pdf",
+    )
+
+
 @app.get("/dashboard")
 @login_required
 def dashboard():
@@ -2278,6 +2551,64 @@ def dashboard():
 @login_required
 def dashboard_recorrencia():
     return render_dashboard_view(recurring_only=True)
+
+
+@app.get("/dashboard/comissionamento")
+@login_required
+def dashboard_comissionamento():
+    user = current_user()
+    filters = parse_commission_filters(request.args, user)
+    data = fetch_commission_dashboard_data(user, filters)
+
+    can_choose_seller = user["role"] == "admin"
+    sellers = []
+    if can_choose_seller:
+        db = get_db()
+        sellers_sql = """
+        SELECT id, username, full_name
+        FROM users
+        WHERE role = 'seller'
+          AND is_active = 1
+        """
+        sellers_params = []
+        if not is_master_user(user):
+            owner_ids = get_user_scope_owner_ids(user)
+            owner_clause, owner_params = build_in_clause("owner_admin_id", owner_ids)
+            sellers_sql += f" AND {owner_clause}"
+            sellers_params.extend(owner_params)
+        sellers_sql += " ORDER BY username COLLATE NOCASE ASC"
+        sellers = db.execute(sellers_sql, sellers_params).fetchall()
+
+    selected_seller = None
+    if filters["seller_id"]:
+        db = get_db()
+        selected_seller = db.execute(
+            """
+            SELECT id, username, full_name
+            FROM users
+            WHERE id = ?
+            """,
+            (filters["seller_id"],),
+        ).fetchone()
+
+    return render_template(
+        "comissionamento.html",
+        filters=filters,
+        can_choose_seller=can_choose_seller,
+        sellers=sellers,
+        selected_seller=selected_seller,
+        summary=data["summary"],
+        sales_rows=data["sales_rows"],
+        rankings_courses=data["rankings_courses"],
+        rankings_companies=data["rankings_companies"],
+        rankings_sellers=data["rankings_sellers"],
+        monthly_rows=data["monthly_rows"],
+        best_course_by_sales=data["best_course_by_sales"],
+        best_course_by_ticket=data["best_course_by_ticket"],
+        favorite_company=data["favorite_company"],
+        current_seller_rank=data["current_seller_rank"],
+        commission_charts=data["charts"],
+    )
 
 
 def render_dashboard_view(recurring_only=False):
@@ -4526,7 +4857,7 @@ def export_xlsx():
             "Telefone",
             "Empresa",
             "Curso",
-            "Vendedor",
+            "Vendedor (login)",
             "Pagamento",
             "Modalidade da Comissão",
             "Parcela",

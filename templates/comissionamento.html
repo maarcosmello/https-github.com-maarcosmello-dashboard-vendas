@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+
+{% block title %}Comissionamento | Comissionamento{% endblock %}
+
+{% block content %}
+<section class="layout">
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Painel de comissionamento</h2>
+      <span class="section-badge">Vendas e comissão por vendedor</span>
+    </div>
+    <form method="get" class="grid-form filters">
+      <label>
+        Data inicial da venda
+        <input type="date" name="sale_date_start" value="{{ filters.sale_date_start }}">
+      </label>
+      <label>
+        Data final da venda
+        <input type="date" name="sale_date_end" value="{{ filters.sale_date_end }}">
+      </label>
+      {% if can_choose_seller %}
+      <label>
+        Vendedor (login)
+        <select name="seller_id">
+          <option value="">Todos</option>
+          {% for seller in sellers %}
+          <option value="{{ seller.id }}" {% if filters.seller_id == seller.id %}selected{% endif %}>
+            {{ seller.username }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      <div class="actions full">
+        <button class="btn btn-primary" type="submit">Aplicar filtros</button>
+        <a class="btn btn-secondary" href="{{ url_for('dashboard_comissionamento') }}">Limpar</a>
+      </div>
+    </form>
+    {% if selected_seller %}
+    <p class="muted small">Vendedor selecionado: <strong>{{ selected_seller.username }}</strong></p>
+    {% endif %}
+  </article>
+
+  <article class="panel full-span">
+    <div class="stats-grid">
+      <div class="metric-card">
+        <p>Vendas no período</p>
+        <strong>{{ summary.sales_count }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Faturamento total</p>
+        <strong>{{ summary.total_revenue|currency }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Comissão prevista total</p>
+        <strong>{{ summary.total_commission_expected|currency }}</strong>
+      </div>
+      <div class="metric-card">
+        <p>Vendas em recorrência</p>
+        <strong>{{ summary.recurring_sales_count }}</strong>
+      </div>
+      {% if current_seller_rank %}
+      <div class="metric-card">
+        <p>Posição no ranking</p>
+        <strong>#{{ current_seller_rank }}</strong>
+      </div>
+      {% endif %}
+    </div>
+  </article>
+
+  <article class="panel">
+    <div class="section-title-row">
+      <h2>Curso mais vendido</h2>
+      <span class="section-badge">Volume</span>
+    </div>
+    {% if best_course_by_sales %}
+    <p><strong>{{ best_course_by_sales.course_name }}</strong> ({{ best_course_by_sales.company_name }})</p>
+    <p class="muted">Vendas: {{ best_course_by_sales.sales_count }}</p>
+    <p class="muted">Faturamento: {{ best_course_by_sales.total_revenue|currency }}</p>
+    {% else %}
+    <p class="muted">Sem dados para o período selecionado.</p>
+    {% endif %}
+  </article>
+
+  <article class="panel">
+    <div class="section-title-row">
+      <h2>Curso com maior ticket</h2>
+      <span class="section-badge">Ticket médio</span>
+    </div>
+    {% if best_course_by_ticket %}
+    <p><strong>{{ best_course_by_ticket.course_name }}</strong> ({{ best_course_by_ticket.company_name }})</p>
+    <p class="muted">Ticket médio: {{ best_course_by_ticket.avg_ticket|currency }}</p>
+    <p class="muted">Maior venda: {{ best_course_by_ticket.max_ticket|currency }}</p>
+    {% else %}
+    <p class="muted">Sem dados para o período selecionado.</p>
+    {% endif %}
+  </article>
+
+  <article class="panel">
+    <div class="section-title-row">
+      <h2>Empresa favorita</h2>
+      <span class="section-badge">Vendas + ticket</span>
+    </div>
+    {% if favorite_company %}
+    <p><strong>{{ favorite_company.company_name }}</strong></p>
+    <p class="muted">Vendas: {{ favorite_company.sales_count }}</p>
+    <p class="muted">Faturamento: {{ favorite_company.total_revenue|currency }}</p>
+    <p class="muted">Ticket médio: {{ favorite_company.avg_ticket|currency }}</p>
+    {% else %}
+    <p class="muted">Sem dados para o período selecionado.</p>
+    {% endif %}
+  </article>
+
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Comissionamento mensal</h2>
+      <span class="section-badge">Organização por mês</span>
+    </div>
+    <div class="charts-grid">
+      <div class="chart-area"><canvas id="chart-commission-monthly" height="110"></canvas></div>
+      <div class="chart-area"><canvas id="chart-value-monthly" height="110"></canvas></div>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Mês</th>
+            <th>Valor (parcelas)</th>
+            <th>Comissão total</th>
+            <th>Comissão confirmada</th>
+            <th>Comissão pendente/atrasada</th>
+            <th>Comissão cancelada</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if monthly_rows %}
+            {% for row in monthly_rows %}
+            <tr>
+              <td>{{ row.month_key|month_br }}</td>
+              <td>{{ row.total_value|currency }}</td>
+              <td>{{ row.total_commission|currency }}</td>
+              <td>{{ row.confirmed_commission|currency }}</td>
+              <td>{{ row.pending_or_overdue_commission|currency }}</td>
+              <td>{{ row.canceled_commission|currency }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="6" class="muted">Sem comissionamento para o período selecionado.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Ranking de cursos</h2>
+      <span class="section-badge">Top faturamento</span>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Curso</th>
+            <th>Empresa</th>
+            <th>Vendas</th>
+            <th>Faturamento</th>
+            <th>Ticket médio</th>
+            <th>Comissão</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if rankings_courses %}
+            {% for row in rankings_courses %}
+            <tr>
+              <td>{{ loop.index }}</td>
+              <td>{{ row.course_name }}</td>
+              <td>{{ row.company_name }}</td>
+              <td>{{ row.sales_count }}</td>
+              <td>{{ row.total_revenue|currency }}</td>
+              <td>{{ row.avg_ticket|currency }}</td>
+              <td>{{ row.total_commission|currency }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="7" class="muted">Sem dados de cursos para o período selecionado.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Ranking de empresas</h2>
+      <span class="section-badge">Top faturamento</span>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Empresa</th>
+            <th>Vendas</th>
+            <th>Faturamento</th>
+            <th>Ticket médio</th>
+            <th>Comissão</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if rankings_companies %}
+            {% for row in rankings_companies %}
+            <tr>
+              <td>{{ loop.index }}</td>
+              <td>{{ row.company_name }}</td>
+              <td>{{ row.sales_count }}</td>
+              <td>{{ row.total_revenue|currency }}</td>
+              <td>{{ row.avg_ticket|currency }}</td>
+              <td>{{ row.total_commission|currency }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="6" class="muted">Sem dados de empresas para o período selecionado.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Ranking de vendedores (login)</h2>
+      <span class="section-badge">Comunidade / escopo</span>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Login</th>
+            <th>Vendas</th>
+            <th>Faturamento</th>
+            <th>Ticket médio</th>
+            <th>Comissão total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if rankings_sellers %}
+            {% for row in rankings_sellers %}
+            <tr {% if current_user.role == 'seller' and row.seller_id == current_user.id %}style="background: rgba(13, 122, 95, 0.08);" {% endif %}>
+              <td>{{ loop.index }}</td>
+              <td>{{ row.seller_username }}</td>
+              <td>{{ row.sales_count }}</td>
+              <td>{{ row.total_revenue|currency }}</td>
+              <td>{{ row.avg_ticket|currency }}</td>
+              <td>{{ row.total_commission|currency }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="6" class="muted">Sem dados de vendedores para o período selecionado.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Vendas do período</h2>
+      <span class="section-badge">Painel detalhado</span>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Cliente</th>
+            <th>Empresa</th>
+            <th>Curso</th>
+            <th>Vendedor (login)</th>
+            <th>Pagamento</th>
+            <th>Parcelas</th>
+            <th>Valor total</th>
+            <th>Comissão total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if sales_rows %}
+            {% for row in sales_rows %}
+            <tr>
+              <td>{{ row.sale_date|date_br }}</td>
+              <td>{{ row.customer_name }}</td>
+              <td>{{ row.company_name }}</td>
+              <td>{{ row.course_name }}</td>
+              <td>{{ row.seller_username }}</td>
+              <td>{{ payment_formats.get(row.payment_format, row.payment_format) }}</td>
+              <td>{{ row.installments_count }}</td>
+              <td>{{ row.total_value|currency }}</td>
+              <td>{{ row.total_commission_expected|currency }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="9" class="muted">Sem vendas para os filtros selecionados.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+
+<script id="commission-chart-data" type="application/json">{{ commission_charts | tojson }}</script>
+<script>
+  (function () {
+    const holder = document.getElementById("commission-chart-data");
+    if (!holder || typeof Chart === "undefined") return;
+
+    let data;
+    try {
+      data = JSON.parse(holder.textContent);
+    } catch {
+      return;
+    }
+
+    const moneyOptions = {
+      responsive: true,
+      maintainAspectRatio: false
+    };
+
+    const commissionCtx = document.getElementById("chart-commission-monthly");
+    if (commissionCtx) {
+      new Chart(commissionCtx, {
+        type: "bar",
+        data: {
+          labels: data.monthly_labels,
+          datasets: [
+            {
+              label: "Comissão total",
+              data: data.monthly_commission,
+              backgroundColor: "rgba(13, 122, 95, 0.78)",
+              borderRadius: 8
+            },
+            {
+              label: "Comissão confirmada",
+              data: data.monthly_confirmed_commission,
+              backgroundColor: "rgba(255, 122, 26, 0.85)",
+              borderRadius: 8
+            }
+          ]
+        },
+        options: moneyOptions
+      });
+    }
+
+    const valueCtx = document.getElementById("chart-value-monthly");
+    if (valueCtx) {
+      new Chart(valueCtx, {
+        type: "line",
+        data: {
+          labels: data.monthly_labels,
+          datasets: [
+            {
+              label: "Valor mensal (parcelas)",
+              data: data.monthly_total_value,
+              borderColor: "rgba(43, 139, 186, 0.95)",
+              backgroundColor: "rgba(43, 139, 186, 0.20)",
+              fill: true,
+              tension: 0.3
+            }
+          ]
+        },
+        options: moneyOptions
+      });
+    }
+  })();
+</script>
+{% endblock %}
+

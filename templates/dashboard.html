@@ -121,8 +121,12 @@
     </div>
     <form method="get" class="grid-form filters">
       <label>
-        Data da venda
+        Data inicial da venda
         <input type="date" name="sale_date_start" value="{{ filters.sale_date_start }}">
+      </label>
+      <label>
+        Data final da venda
+        <input type="date" name="sale_date_end" value="{{ filters.sale_date_end }}">
       </label>
       <label>
         Empresa
@@ -144,11 +148,11 @@
       </label>
       {% if sellers %}
       <label>
-        Vendedor
+        Vendedor (login)
         <select name="seller_id">
           <option value="">Todos</option>
           {% for seller in sellers %}
-          <option value="{{ seller.id }}" {% if filters.seller_id == seller.id %}selected{% endif %}>{{ seller.full_name }}</option>
+          <option value="{{ seller.id }}" {% if filters.seller_id == seller.id %}selected{% endif %}>{{ seller.username }}</option>
           {% endfor %}
         </select>
       </label>
@@ -191,7 +195,7 @@
       </label>
       <label class="full">
         Busca geral
-        <input type="text" name="search" placeholder="cliente, telefone, empresa, curso, vendedor" value="{{ filters.search }}">
+        <input type="text" name="search" placeholder="cliente, telefone, empresa, curso, vendedor(login)" value="{{ filters.search }}">
       </label>
       <div class="actions full">
         <button class="btn btn-primary" type="submit">Aplicar filtros</button>
@@ -328,11 +332,11 @@
       </label>
       {% if current_user.role == 'admin' or current_user.is_manager %}
       <label>
-        Vendedor responsável
+        Vendedor responsável (login)
         <select name="seller_id" required>
           <option value="">Selecione</option>
           {% for seller in sellers %}
-          <option value="{{ seller.id }}" {% if sale_form.seller_id == seller.id %}selected{% endif %}>{{ seller.full_name }}</option>
+          <option value="{{ seller.id }}" {% if sale_form.seller_id == seller.id %}selected{% endif %}>{{ seller.username }}</option>
           {% endfor %}
         </select>
       </label>
@@ -374,7 +378,7 @@
             <th>Telefone</th>
             <th>Empresa</th>
             <th>Curso</th>
-            <th>Vendedor</th>
+            <th>Vendedor (login)</th>
             <th>Pagamento</th>
             <th>Modalidade da comissão</th>
             <th>Parcela</th>
