@@ -5,24 +5,24 @@
 {% block content %}
 <section class="panel auth-panel">
   <h2>Solicitar entrada na plataforma</h2>
-  <p class="muted">Informe o <strong>usuário de indicação</strong> do administrador ou gestor da sua comunidade.</p>
+  <p class="muted">Informe o <strong>usuário de indicação</strong> de um administrador. Se ele tiver mais de uma comunidade, a definição final será feita na aprovação.</p>
   <form method="post" class="grid-form auth-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label>Usuário (sem espaços)<input type="text" name="username" maxlength="8" required></label>
-    <label>Nome completo<input type="text" name="full_name" required></label>
+    <label>Usuário<input type="text" name="username" minlength="3" maxlength="8" placeholder="login" required></label>
+    <label>Nome completo<input type="text" name="full_name" placeholder="nome completo" required></label>
     <label>
       Perfil solicitado
       <select name="desired_profile" required>
-        <option value="manager">Gestor</option>
         <option value="seller">Vendedor</option>
         <option value="viewer">Visualizador</option>
       </select>
     </label>
-    <label>Usuário de indicação<input type="text" name="invite_username" maxlength="8" placeholder="admin01" required></label>
-    <label>Senha<input type="password" name="password" maxlength="8" required></label>
-    <label>Confirmar senha<input type="password" name="password_confirm" maxlength="8" required></label>
+    <label>Usuário de indicação<input type="text" name="invite_username" minlength="3" maxlength="8" placeholder="login do admin" required></label>
+    <label>Senha<input type="password" name="password" minlength="3" maxlength="8" placeholder="••••••••" required></label>
+    <label>Confirmar senha<input type="password" name="password_confirm" minlength="3" maxlength="8" placeholder="••••••••" required></label>
     <button class="btn btn-primary" type="submit">Enviar solicitação</button>
   </form>
+  <p class="muted small">Dica: login sem espaço, com 3 a 8 caracteres.</p>
   <p class="muted small">Já possui login? <a href="{{ url_for('login') }}">Entrar</a></p>
 </section>
 {% endblock %}

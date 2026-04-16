@@ -35,7 +35,7 @@
         {% if current_user.role == 'viewer' %}
         <a class="mini-link {% if current_ep in ['viewer_course_access'] %}active{% endif %}" href="{{ url_for('viewer_course_access') }}">Meus Cursos</a>
         {% endif %}
-        {% if current_user.role == 'admin' or current_user.is_manager %}
+        {% if current_user.role == 'admin' %}
         <a class="mini-link {% if current_ep in ['manage_users'] %}active{% endif %}" href="{{ url_for('manage_users') }}">Usuários</a>
         <a class="mini-link {% if current_ep in ['user_access_requests'] %}active{% endif %}" href="{{ url_for('user_access_requests') }}">Solicitações de Usuários</a>
         {% if current_user.is_master %}

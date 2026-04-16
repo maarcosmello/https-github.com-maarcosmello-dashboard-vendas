@@ -7,18 +7,24 @@
   {% if actor_is_master %}
   <article class="panel">
     <div class="section-title-row">
-      <h2>Novo admin de comunidade</h2>
+      <h2>Novo usuário (rápido)</h2>
       <span class="section-badge">Exclusivo do mestre</span>
     </div>
     <form method="post" class="grid-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="action" value="create_admin">
-      <label>Usuário (3 a 8)<input type="text" name="username" minlength="3" maxlength="8" required></label>
-      <label>Nome completo<input type="text" name="full_name" required></label>
-      <label>Senha inicial (3 a 8)<input type="password" name="password" minlength="3" maxlength="8" required></label>
-      <label>Confirmar senha<input type="password" name="password_confirm" minlength="3" maxlength="8" required></label>
-      <button class="btn btn-primary" type="submit">Criar admin da comunidade</button>
+      <input type="hidden" name="action" value="create_simple_user">
+      <label>Login (3 a 8)<input type="text" name="username" minlength="3" maxlength="8" placeholder="login" required></label>
+      <label>Nome completo<input type="text" name="full_name" placeholder="nome completo" required></label>
+      <label>Senha inicial (3 a 8)<input type="password" name="password" minlength="3" maxlength="8" placeholder="••••••••" required></label>
+      <label>Confirmar senha<input type="password" name="password_confirm" minlength="3" maxlength="8" placeholder="••••••••" required></label>
+      <button class="btn btn-primary" type="submit">Criar usuário</button>
     </form>
+    <p class="muted small">Este cadastro rápido cria o usuário como visualizador. Depois você pode ajustar perfil e comunidade na tabela.</p>
+    {% if can_export_credentials %}
+    <div class="actions">
+      <a class="btn btn-secondary" href="{{ url_for('export_user_credentials') }}">Baixar Excel de logins e senhas</a>
+    </div>
+    {% endif %}
   </article>
   {% endif %}
 
@@ -30,8 +36,8 @@
     <form method="post" class="grid-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="action" value="create_request">
-      <label>Usuário<input type="text" name="username" minlength="3" maxlength="8" required></label>
-      <label>Nome completo<input type="text" name="full_name" required></label>
+      <label>Usuário<input type="text" name="username" minlength="3" maxlength="8" placeholder="login" required></label>
+      <label>Nome completo<input type="text" name="full_name" placeholder="nome completo" required></label>
       <label>
         Perfil solicitado
         <select name="desired_profile" required>
@@ -39,20 +45,20 @@
           <option value="viewer">Visualizador</option>
         </select>
       </label>
-      <label>Usuário de indicação (admin ou mestre)<input type="text" name="invite_username" minlength="3" maxlength="8" required></label>
+      <label>Usuário de indicação (admin)<input type="text" name="invite_username" minlength="3" maxlength="8" placeholder="login do admin" required></label>
       {% if actor_is_master %}
       <label>
         Comunidade de destino (quando indicação for mestre)
         <select name="preferred_owner_admin_id">
           <option value="">Padrão (primeira comunidade ativa)</option>
           {% for admin in community_admins %}
-          <option value="{{ admin.id }}">{{ admin.full_name }}</option>
+          <option value="{{ admin.id }}">{{ admin.username }} - {{ admin.full_name }}</option>
           {% endfor %}
         </select>
       </label>
       {% endif %}
-      <label>Senha inicial<input type="password" name="password" minlength="3" maxlength="8" required></label>
-      <label>Confirmar senha<input type="password" name="password_confirm" minlength="3" maxlength="8" required></label>
+      <label>Senha inicial<input type="password" name="password" minlength="3" maxlength="8" placeholder="••••••••" required></label>
+      <label>Confirmar senha<input type="password" name="password_confirm" minlength="3" maxlength="8" placeholder="••••••••" required></label>
       <button class="btn btn-primary" type="submit">Enviar solicitação</button>
     </form>
     <p class="muted small">
@@ -105,6 +111,7 @@
             <th>Nome</th>
             <th>Usuário</th>
             <th>Perfil</th>
+            {% if actor_is_master %}<th>Senha atual</th>{% endif %}
             <th>Usuário de indicação</th>
             <th>Comunidade</th>
             <th>Status</th>
@@ -127,8 +134,19 @@
                 Visualizador
               {% endif %}
             </td>
+            {% if actor_is_master %}
+            <td>{{ user.password_plaintext or 'Não disponível' }}</td>
+            {% endif %}
             <td>{{ user.invited_by_username or '-' }}</td>
-            <td>{{ user.owner_admin_name or ('Própria' if user.role == 'admin' and not user.is_master else '-') }}</td>
+            <td>
+              {% if user.owner_admin_name %}
+                {{ user.owner_admin_username }} - {{ user.owner_admin_name }}
+              {% elif user.role == 'admin' and not user.is_master %}
+                Própria
+              {% else %}
+                -
+              {% endif %}
+            </td>
             <td>{{ 'Ativo' if user.is_active else 'Inativo' }}</td>
             <td>
               <form method="post" class="row-actions">
@@ -136,6 +154,8 @@
                 <input type="hidden" name="action" value="save_user_changes">
                 <input type="hidden" name="user_id" value="{{ user.id }}">
                 {% if actor_is_master %}
+                <input type="text" name="edit_full_name" value="{{ user.full_name }}" placeholder="nome completo">
+                <input type="text" name="edit_username" value="{{ user.username }}" minlength="3" maxlength="8" placeholder="login">
                 <select name="profile">
                   <option value="master" {% if user.role == 'admin' and user.is_master %}selected{% endif %}>Administrador Mestre</option>
                   <option value="admin" {% if user.role == 'admin' and not user.is_master %}selected{% endif %}>Administrador</option>
@@ -143,9 +163,9 @@
                   <option value="viewer" {% if user.role == 'viewer' %}selected{% endif %}>Visualizador</option>
                 </select>
                 <select name="community_admin_id">
-                  <option value="">Comunidade</option>
+                  <option value="">Sem comunidade</option>
                   {% for admin in community_admins %}
-                  <option value="{{ admin.id }}" {% if user.owner_admin_id == admin.id %}selected{% endif %}>{{ admin.full_name }}</option>
+                  <option value="{{ admin.id }}" {% if user.owner_admin_id == admin.id %}selected{% endif %}>{{ admin.username }} - {{ admin.full_name }}</option>
                   {% endfor %}
                 </select>
                 {% endif %}
@@ -153,7 +173,7 @@
                   <option value="1" {% if user.is_active %}selected{% endif %}>Ativo</option>
                   <option value="0" {% if not user.is_active %}selected{% endif %}>Inativo</option>
                 </select>
-                <input type="password" name="new_password" minlength="3" maxlength="8" placeholder="Nova senha (opcional)">
+                <input type="password" name="new_password" minlength="3" maxlength="8" placeholder="•••••••• (nova senha)">
                 <button class="mini-btn" type="submit">Salvar alterações</button>
               </form>
             </td>
@@ -220,7 +240,7 @@
         <select name="target_user_id" required>
           <option value="">Selecione</option>
           {% for seller in manageable_sellers %}
-          <option value="{{ seller.id }}">{{ seller.full_name }}</option>
+          <option value="{{ seller.id }}">{{ seller.username if seller.username is defined else seller.full_name }}</option>
           {% endfor %}
         </select>
       </label>

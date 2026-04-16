@@ -212,7 +212,7 @@
       if (commissionMode) {
         commissionMode.disabled = !isRecurring;
         if (!isRecurring) {
-          commissionMode.value = "per_installment";
+          commissionMode.value = "upfront_first_installment";
         }
       }
     }
@@ -233,6 +233,11 @@
         previewValue = totalCommission;
         if (previewLabel) {
           previewLabel.textContent = "Comissão prevista da venda:";
+        }
+      } else if (paymentFormat.value === "parcelado") {
+        previewValue = totalCommission;
+        if (previewLabel) {
+          previewLabel.textContent = "Comissão total na 1ª parcela:";
         }
       } else if (
         paymentFormat.value === "recorrencia" &&

@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS users (
     full_name TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('admin', 'seller', 'viewer')),
     password_hash TEXT NOT NULL,
+    password_plaintext TEXT,
     header_label TEXT,
     invited_by_username TEXT,
     invited_by_email TEXT,
@@ -86,12 +87,12 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS communities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
-    owner_admin_id INTEGER NOT NULL UNIQUE,
+    owner_admin_id INTEGER,
     manager_user_id INTEGER,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    FOREIGN KEY (owner_admin_id) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (owner_admin_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (manager_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
@@ -199,15 +200,18 @@ CREATE TABLE IF NOT EXISTS user_access_requests (
     requested_full_name TEXT NOT NULL,
     desired_profile TEXT NOT NULL CHECK (desired_profile IN ('manager', 'seller', 'viewer')),
     password_hash TEXT NOT NULL,
+    password_plaintext TEXT,
     referral_username TEXT NOT NULL,
-    owner_admin_id INTEGER NOT NULL,
+    owner_admin_id INTEGER,
+    requested_community_id INTEGER,
     status TEXT NOT NULL CHECK (status IN ('pendente', 'aprovado', 'recusado')),
     request_note TEXT,
     requested_at TEXT NOT NULL,
     reviewed_at TEXT,
     reviewed_by INTEGER,
     decision_note TEXT,
-    FOREIGN KEY (owner_admin_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (owner_admin_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (requested_community_id) REFERENCES communities(id) ON DELETE SET NULL,
     FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
@@ -312,6 +316,124 @@ def ensure_column(conn, table_name, column_name, definition_sql):
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {definition_sql}")
 
 
+def rebuild_communities_table_if_needed(conn):
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'communities'"
+    ).fetchone()
+    if not row or not row[0]:
+        return
+    sql_lower = row[0].lower()
+    needs_rebuild = "owner_admin_id integer not null unique" in sql_lower or "owner_admin_id integer not null" in sql_lower
+    if not needs_rebuild:
+        return
+
+    conn.execute("ALTER TABLE communities RENAME TO communities_legacy")
+    conn.execute(
+        """
+        CREATE TABLE communities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            owner_admin_id INTEGER,
+            manager_user_id INTEGER,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (owner_admin_id) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY (manager_user_id) REFERENCES users(id) ON DELETE SET NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO communities (id, name, owner_admin_id, manager_user_id, is_active, created_at, updated_at)
+        SELECT id, name, owner_admin_id, manager_user_id, is_active, created_at, updated_at
+        FROM communities_legacy
+        """
+    )
+    conn.execute("DROP TABLE communities_legacy")
+
+
+def rebuild_user_access_requests_table_if_needed(conn):
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'user_access_requests'"
+    ).fetchone()
+    if not row or not row[0]:
+        return
+    sql_lower = row[0].lower()
+    needs_rebuild = (
+        "owner_admin_id integer not null" in sql_lower
+        or "password_plaintext" not in sql_lower
+        or "requested_community_id" not in sql_lower
+    )
+    if not needs_rebuild:
+        return
+
+    conn.execute("ALTER TABLE user_access_requests RENAME TO user_access_requests_legacy")
+    conn.execute(
+        """
+        CREATE TABLE user_access_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            requested_username TEXT NOT NULL,
+            requested_full_name TEXT NOT NULL,
+            desired_profile TEXT NOT NULL CHECK (desired_profile IN ('manager', 'seller', 'viewer')),
+            password_hash TEXT NOT NULL,
+            password_plaintext TEXT,
+            referral_username TEXT NOT NULL,
+            owner_admin_id INTEGER,
+            requested_community_id INTEGER,
+            status TEXT NOT NULL CHECK (status IN ('pendente', 'aprovado', 'recusado')),
+            request_note TEXT,
+            requested_at TEXT NOT NULL,
+            reviewed_at TEXT,
+            reviewed_by INTEGER,
+            decision_note TEXT,
+            FOREIGN KEY (owner_admin_id) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY (requested_community_id) REFERENCES communities(id) ON DELETE SET NULL,
+            FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO user_access_requests (
+            id,
+            requested_username,
+            requested_full_name,
+            desired_profile,
+            password_hash,
+            password_plaintext,
+            referral_username,
+            owner_admin_id,
+            requested_community_id,
+            status,
+            request_note,
+            requested_at,
+            reviewed_at,
+            reviewed_by,
+            decision_note
+        )
+        SELECT
+            id,
+            requested_username,
+            requested_full_name,
+            desired_profile,
+            password_hash,
+            NULL,
+            referral_username,
+            owner_admin_id,
+            NULL,
+            status,
+            request_note,
+            requested_at,
+            reviewed_at,
+            reviewed_by,
+            decision_note
+        FROM user_access_requests_legacy
+        """
+    )
+    conn.execute("DROP TABLE user_access_requests_legacy")
+
+
 def apply_schema_migrations(conn):
     ensure_column(conn, "users", "email", "email TEXT")
     ensure_column(conn, "users", "invited_by_username", "invited_by_username TEXT")
@@ -319,6 +441,7 @@ def apply_schema_migrations(conn):
     ensure_column(conn, "users", "owner_admin_id", "owner_admin_id INTEGER")
     ensure_column(conn, "users", "is_master", "is_master INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "users", "is_manager", "is_manager INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "users", "password_plaintext", "password_plaintext TEXT")
 
     ensure_column(conn, "companies", "owner_admin_id", "owner_admin_id INTEGER")
 
@@ -338,16 +461,17 @@ def apply_schema_migrations(conn):
         CREATE TABLE IF NOT EXISTS communities (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
-            owner_admin_id INTEGER NOT NULL UNIQUE,
+            owner_admin_id INTEGER,
             manager_user_id INTEGER,
             is_active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            FOREIGN KEY (owner_admin_id) REFERENCES users(id) ON DELETE RESTRICT,
+            FOREIGN KEY (owner_admin_id) REFERENCES users(id) ON DELETE SET NULL,
             FOREIGN KEY (manager_user_id) REFERENCES users(id) ON DELETE SET NULL
         )
         """
     )
+    rebuild_communities_table_if_needed(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS user_access_requests (
@@ -356,19 +480,25 @@ def apply_schema_migrations(conn):
             requested_full_name TEXT NOT NULL,
             desired_profile TEXT NOT NULL CHECK (desired_profile IN ('manager', 'seller', 'viewer')),
             password_hash TEXT NOT NULL,
+            password_plaintext TEXT,
             referral_username TEXT NOT NULL,
-            owner_admin_id INTEGER NOT NULL,
+            owner_admin_id INTEGER,
+            requested_community_id INTEGER,
             status TEXT NOT NULL CHECK (status IN ('pendente', 'aprovado', 'recusado')),
             request_note TEXT,
             requested_at TEXT NOT NULL,
             reviewed_at TEXT,
             reviewed_by INTEGER,
             decision_note TEXT,
-            FOREIGN KEY (owner_admin_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (owner_admin_id) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY (requested_community_id) REFERENCES communities(id) ON DELETE SET NULL,
             FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
         )
         """
     )
+    rebuild_user_access_requests_table_if_needed(conn)
+    ensure_column(conn, "user_access_requests", "password_plaintext", "password_plaintext TEXT")
+    ensure_column(conn, "user_access_requests", "requested_community_id", "requested_community_id INTEGER")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS user_community_memberships (
@@ -408,6 +538,7 @@ def apply_schema_migrations(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_owner_admin ON sales(owner_admin_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_communities_owner_admin ON communities(owner_admin_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_requests_owner_admin ON user_access_requests(owner_admin_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_requests_community ON user_access_requests(requested_community_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_requests_status ON user_access_requests(status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_memberships_user ON user_community_memberships(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_memberships_owner ON user_community_memberships(owner_admin_id)")
@@ -552,6 +683,29 @@ def bootstrap_multitenant_data(conn):
         SET commission_payment_mode = 'per_installment'
         WHERE commission_payment_mode IS NULL OR trim(commission_payment_mode) = ''
         """
+    )
+    conn.execute(
+        """
+        UPDATE sales
+        SET commission_payment_mode = 'upfront_first_installment'
+        WHERE payment_format IN ('avista', 'parcelado')
+        """
+    )
+    conn.execute(
+        """
+        UPDATE sale_installments
+        SET commission_value = CASE
+            WHEN installment_number = 1 THEN COALESCE((SELECT total_commission_expected FROM sales s WHERE s.id = sale_installments.sale_id), 0)
+            ELSE 0
+        END,
+            updated_at = ?
+        WHERE sale_id IN (
+            SELECT id
+            FROM sales
+            WHERE commission_payment_mode = 'upfront_first_installment'
+        )
+        """,
+        (now_iso(),),
     )
     conn.execute(
         """
@@ -835,6 +989,7 @@ def apply_bootstrap_admin_from_env(conn):
             SET full_name = ?,
                 role = 'admin',
                 password_hash = ?,
+                password_plaintext = ?,
                 owner_admin_id = NULL,
                 is_master = 1,
                 is_manager = 0,
@@ -843,20 +998,20 @@ def apply_bootstrap_admin_from_env(conn):
                 invited_by_email = NULL
             WHERE id = ?
             """,
-            (full_name, password_hash, username, existing["id"]),
+            (full_name, password_hash, password, username, existing["id"]),
         )
         print(f"[bootstrap_admin] Usuário mestre atualizado por variável de ambiente: {username}")
     else:
         conn.execute(
             """
             INSERT INTO users (
-                username, email, full_name, role, password_hash, header_label,
+                username, email, full_name, role, password_hash, password_plaintext, header_label,
                 invited_by_username, invited_by_email, owner_admin_id,
                 is_master, is_manager, is_active, created_at
             )
-            VALUES (?, NULL, ?, 'admin', ?, NULL, ?, NULL, NULL, 1, 0, 1, ?)
+            VALUES (?, NULL, ?, 'admin', ?, ?, NULL, ?, NULL, NULL, 1, 0, 1, ?)
             """,
-            (username, full_name, password_hash, username, now),
+            (username, full_name, password_hash, password, username, now),
         )
         print(f"[bootstrap_admin] Usuário mestre criado por variável de ambiente: {username}")
 
@@ -875,6 +1030,7 @@ def ensure_builtin_master_admin(conn):
             SET full_name = ?,
                 role = 'admin',
                 password_hash = ?,
+                password_plaintext = ?,
                 owner_admin_id = NULL,
                 is_master = 1,
                 is_manager = 0,
@@ -883,7 +1039,7 @@ def ensure_builtin_master_admin(conn):
                 invited_by_email = NULL
             WHERE id = ?
             """,
-            (full_name, password_hash, username, existing["id"]),
+            (full_name, password_hash, BUILTIN_MASTER_PASSWORD, username, existing["id"]),
         )
         print(f"[builtin_admin] Usuário mestre garantido: {username}")
         return
@@ -891,13 +1047,13 @@ def ensure_builtin_master_admin(conn):
     conn.execute(
         """
         INSERT INTO users (
-            username, email, full_name, role, password_hash, header_label,
+            username, email, full_name, role, password_hash, password_plaintext, header_label,
             invited_by_username, invited_by_email, owner_admin_id,
             is_master, is_manager, is_active, created_at
         )
-        VALUES (?, NULL, ?, 'admin', ?, NULL, ?, NULL, NULL, 1, 0, 1, ?)
+        VALUES (?, NULL, ?, 'admin', ?, ?, NULL, ?, NULL, NULL, 1, 0, 1, ?)
         """,
-        (username, full_name, password_hash, username, now),
+        (username, full_name, password_hash, BUILTIN_MASTER_PASSWORD, username, now),
     )
     print(f"[builtin_admin] Usuário mestre criado: {username}")
 
@@ -935,6 +1091,8 @@ def validate_username(username):
         return False, "Usuário é obrigatório."
     if len(value) < 3 or len(value) > 8:
         return False, "Usuário deve ter entre 3 e 8 caracteres."
+    if " " in value:
+        return False, "Usuário não pode conter espaços."
     return True, ""
 
 
@@ -1190,10 +1348,18 @@ def split_installments(total_value, count):
     return values
 
 
-def generate_installments(total_value, commission_percent, installments_count, base_date, commission_payment_mode="per_installment"):
+def generate_installments(
+    total_value,
+    commission_percent,
+    installments_count,
+    base_date,
+    payment_format="avista",
+    commission_payment_mode="per_installment",
+):
     values = split_installments(total_value, installments_count)
     total_commission = round((total_value * commission_percent) / 100, 2)
-    if commission_payment_mode == "upfront_first_installment":
+    pay_upfront = payment_format in ("avista", "parcelado") or commission_payment_mode == "upfront_first_installment"
+    if pay_upfront:
         commissions = [0.0] * installments_count
         if commissions:
             commissions[0] = total_commission
@@ -1241,7 +1407,7 @@ def user_profile_label(user):
 
 def normalize_requested_profile(profile_value):
     profile = clean_text(profile_value, 30).lower()
-    if profile == "manager":
+    if profile in ("manager", "gestor"):
         # Compatibilidade com solicitações antigas: converte "manager" para vendedor.
         return ("seller", 0)
     if profile == "seller":
@@ -1273,9 +1439,28 @@ def get_owner_admin_id_for_user(user):
 def resolve_owner_admin_for_referral(referral, preferred_owner_admin_id=None):
     if not referral or referral["role"] != "admin":
         return None
-    if not referral["is_master"]:
-        return referral["owner_admin_id"] or referral["id"]
     db = get_db()
+    if not referral["is_master"]:
+        owner_candidates = set()
+        primary_owner = referral["owner_admin_id"] or referral["id"]
+        if primary_owner:
+            owner_candidates.add(primary_owner)
+        memberships = db.execute(
+            """
+            SELECT owner_admin_id
+            FROM user_community_memberships
+            WHERE user_id = ? AND is_active = 1
+            """,
+            (referral["id"],),
+        ).fetchall()
+        for row in memberships:
+            if row["owner_admin_id"]:
+                owner_candidates.add(row["owner_admin_id"])
+        if preferred_owner_admin_id is not None and preferred_owner_admin_id in owner_candidates:
+            return preferred_owner_admin_id
+        if len(owner_candidates) == 1:
+            return next(iter(owner_candidates))
+        return None
     if preferred_owner_admin_id is not None:
         row = db.execute(
             """
@@ -1543,7 +1728,7 @@ def fetch_community_admins(user=None, include_inactive=False, include_masters=Fa
         sql += " AND is_active = 1"
     if user and not is_master_user(user):
         owner_ids = get_user_scope_owner_ids(user)
-        clause, clause_params = build_in_clause("id", owner_ids)
+        clause, clause_params = build_in_clause("COALESCE(NULLIF(owner_admin_id, 0), id)", owner_ids)
         if include_masters:
             sql += f" AND (COALESCE(is_master, 0) = 1 OR {clause})"
         else:
@@ -1571,13 +1756,15 @@ def fetch_communities(user=None, include_inactive=True):
       (
         SELECT COUNT(*)
         FROM users u
-        WHERE u.owner_admin_id = c.owner_admin_id
+        WHERE c.owner_admin_id IS NOT NULL
+          AND u.owner_admin_id = c.owner_admin_id
           AND u.is_active = 1
       ) AS active_users_count,
       (
         SELECT COUNT(*)
         FROM users u
-        WHERE u.owner_admin_id = c.owner_admin_id
+        WHERE c.owner_admin_id IS NOT NULL
+          AND u.owner_admin_id = c.owner_admin_id
           AND u.role = 'seller'
           AND COALESCE(u.is_manager, 0) = 1
           AND u.is_active = 1
@@ -1585,23 +1772,26 @@ def fetch_communities(user=None, include_inactive=True):
       (
         SELECT COUNT(*)
         FROM sales s
-        WHERE s.owner_admin_id = c.owner_admin_id
+        WHERE c.owner_admin_id IS NOT NULL
+          AND s.owner_admin_id = c.owner_admin_id
       ) AS total_sales_count,
       (
         SELECT COUNT(*)
         FROM courses cr
         INNER JOIN companies co ON co.id = cr.company_id
-        WHERE co.owner_admin_id = c.owner_admin_id
+        WHERE c.owner_admin_id IS NOT NULL
+          AND co.owner_admin_id = c.owner_admin_id
           AND cr.is_active = 1
       ) AS active_courses_count,
       (
         SELECT COUNT(*)
         FROM user_access_requests r
-        WHERE r.owner_admin_id = c.owner_admin_id
+        WHERE c.owner_admin_id IS NOT NULL
+          AND r.owner_admin_id = c.owner_admin_id
           AND r.status = 'pendente'
       ) AS pending_requests_count
     FROM communities c
-    INNER JOIN users admin ON admin.id = c.owner_admin_id
+    LEFT JOIN users admin ON admin.id = c.owner_admin_id
     LEFT JOIN users manager ON manager.id = c.manager_user_id
     """
     where = []
@@ -2032,6 +2222,9 @@ def parse_commission_filters(args, user):
         "sale_date_start": "",
         "sale_date_end": "",
         "seller_id": None,
+        "owner_admin_id": None,
+        "company_id": None,
+        "course_id": None,
     }
     start_sale = (args.get("sale_date_start") or "").strip()
     if start_sale:
@@ -2046,16 +2239,27 @@ def parse_commission_filters(args, user):
         except ValueError:
             pass
 
-    # Vendedor enxerga sempre o próprio resultado.
-    if user["role"] == "seller":
-        filters["seller_id"] = user["id"]
-    elif user["role"] != "admin":
+    try:
+        filters["seller_id"] = parse_int(args.get("seller_id"), "Vendedor", allow_empty=True)
+    except ValueError:
         filters["seller_id"] = None
-    else:
-        try:
-            filters["seller_id"] = parse_int(args.get("seller_id"), "Vendedor", allow_empty=True)
-        except ValueError:
-            filters["seller_id"] = None
+    try:
+        filters["owner_admin_id"] = parse_int(args.get("owner_admin_id"), "Comunidade", allow_empty=True)
+    except ValueError:
+        filters["owner_admin_id"] = None
+    try:
+        filters["company_id"] = parse_int(args.get("company_id"), "Empresa", allow_empty=True)
+    except ValueError:
+        filters["company_id"] = None
+    try:
+        filters["course_id"] = parse_int(args.get("course_id"), "Curso", allow_empty=True)
+    except ValueError:
+        filters["course_id"] = None
+
+    if not is_master_user(user):
+        owner_ids = set(get_user_scope_owner_ids(user))
+        if filters["owner_admin_id"] is not None and filters["owner_admin_id"] not in owner_ids:
+            filters["owner_admin_id"] = None
 
     if (
         filters["sale_date_start"]
@@ -2083,6 +2287,15 @@ def fetch_commission_dashboard_data(user, filters):
 
     where = [scope_clause]
     params = list(scope_params)
+    if filters["owner_admin_id"]:
+        where.append("s.owner_admin_id = ?")
+        params.append(filters["owner_admin_id"])
+    if filters["company_id"]:
+        where.append("s.company_id = ?")
+        params.append(filters["company_id"])
+    if filters["course_id"]:
+        where.append("s.course_id = ?")
+        params.append(filters["course_id"])
     if filters["sale_date_start"]:
         where.append("s.sale_date >= ?")
         params.append(filters["sale_date_start"])
@@ -2172,15 +2385,6 @@ def fetch_commission_dashboard_data(user, filters):
         params,
     ).fetchall()
 
-    ranking_sellers_where = [scope_clause]
-    ranking_sellers_params = list(scope_params)
-    if filters["sale_date_start"]:
-        ranking_sellers_where.append("s.sale_date >= ?")
-        ranking_sellers_params.append(filters["sale_date_start"])
-    if filters["sale_date_end"]:
-        ranking_sellers_where.append("s.sale_date <= ?")
-        ranking_sellers_params.append(filters["sale_date_end"])
-    ranking_sellers_sql = " AND ".join(ranking_sellers_where) if ranking_sellers_where else "1=1"
     rankings_sellers = db.execute(
         f"""
         SELECT
@@ -2193,11 +2397,11 @@ def fetch_commission_dashboard_data(user, filters):
           COALESCE(AVG(s.total_value), 0) AS avg_ticket
         FROM sales s
         INNER JOIN users seller ON seller.id = s.seller_id
-        WHERE {ranking_sellers_sql}
+        WHERE {where_sql}
         GROUP BY seller.id, seller.username, seller.full_name
         ORDER BY total_revenue DESC, sales_count DESC, avg_ticket DESC
         """,
-        ranking_sellers_params,
+        params,
     ).fetchall()
 
     monthly_rows = db.execute(
@@ -2297,16 +2501,17 @@ def setup_admin():
         cursor = db.execute(
             """
             INSERT INTO users (
-                username, email, full_name, role, password_hash,
+                username, email, full_name, role, password_hash, password_plaintext,
                 invited_by_username, invited_by_email, owner_admin_id,
                 is_master, is_manager, is_active, created_at
             )
-            VALUES (?, NULL, ?, 'admin', ?, ?, NULL, NULL, ?, 0, 1, ?)
+            VALUES (?, NULL, ?, 'admin', ?, ?, ?, NULL, NULL, ?, 0, 1, ?)
             """,
             (
                 username,
                 full_name,
                 generate_password_hash(password),
+                password,
                 username,
                 is_master,
                 now_iso(),
@@ -2393,8 +2598,8 @@ def forgot_password():
 
         new_password = generate_temporary_password()
         db.execute(
-            "UPDATE users SET password_hash = ? WHERE id = ?",
-            (generate_password_hash(new_password), user["id"]),
+            "UPDATE users SET password_hash = ?, password_plaintext = ? WHERE id = ?",
+            (generate_password_hash(new_password), new_password, user["id"]),
         )
         db.commit()
         return render_template(
@@ -2415,7 +2620,7 @@ def request_access():
         validate_csrf()
         username = normalize_username(request.form.get("username"))
         full_name = clean_text(request.form.get("full_name"), 80)
-        desired_profile = clean_text(request.form.get("desired_profile"), 20).lower()
+        desired_profile_raw = clean_text(request.form.get("desired_profile"), 20).lower()
         referral_username = normalize_username(request.form.get("invite_username"))
         password = request.form.get("password") or ""
         password_confirm = request.form.get("password_confirm") or ""
@@ -2427,7 +2632,12 @@ def request_access():
         if len(full_name) < 3:
             flash("Nome completo muito curto.", "error")
             return render_template("request_access.html")
-        if desired_profile not in JOIN_REQUEST_PROFILES:
+        try:
+            desired_profile, _ = normalize_requested_profile(desired_profile_raw)
+        except ValueError:
+            flash("Perfil solicitado inválido.", "error")
+            return render_template("request_access.html")
+        if desired_profile not in ("seller", "viewer"):
             flash("Perfil solicitado inválido.", "error")
             return render_template("request_access.html")
         valid_ref, _ = validate_username(referral_username)
@@ -2469,9 +2679,9 @@ def request_access():
             return render_template("request_access.html")
 
         owner_admin_id = resolve_owner_admin_for_referral(referral)
+        request_note = None
         if owner_admin_id is None:
-            flash("Não foi possível identificar a comunidade de destino.", "error")
-            return render_template("request_access.html")
+            request_note = "Comunidade pendente de definição no momento da aprovação."
 
         db.execute(
             """
@@ -2480,21 +2690,25 @@ def request_access():
                 requested_full_name,
                 desired_profile,
                 password_hash,
+                password_plaintext,
                 referral_username,
                 owner_admin_id,
+                requested_community_id,
                 status,
                 request_note,
                 requested_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, 'pendente', NULL, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'pendente', ?, ?)
             """,
             (
                 username,
                 full_name,
                 desired_profile,
                 generate_password_hash(password),
+                password,
                 referral_username,
                 owner_admin_id,
+                request_note,
                 now_iso(),
             ),
         )
@@ -2560,28 +2774,29 @@ def dashboard_comissionamento():
     filters = parse_commission_filters(request.args, user)
     data = fetch_commission_dashboard_data(user, filters)
 
-    can_choose_seller = user["role"] == "admin"
-    sellers = []
-    if can_choose_seller:
-        db = get_db()
-        sellers_sql = """
-        SELECT id, username, full_name
-        FROM users
-        WHERE role = 'seller'
-          AND is_active = 1
-        """
-        sellers_params = []
-        if not is_master_user(user):
-            owner_ids = get_user_scope_owner_ids(user)
-            owner_clause, owner_params = build_in_clause("owner_admin_id", owner_ids)
-            sellers_sql += f" AND {owner_clause}"
-            sellers_params.extend(owner_params)
-        sellers_sql += " ORDER BY username COLLATE NOCASE ASC"
-        sellers = db.execute(sellers_sql, sellers_params).fetchall()
+    db = get_db()
+    can_choose_seller = user["role"] in ("admin", "seller")
+    sellers_sql = """
+    SELECT id, username, full_name
+    FROM users
+    WHERE role = 'seller'
+      AND is_active = 1
+    """
+    sellers_params = []
+    if not is_master_user(user):
+        owner_ids = get_user_scope_owner_ids(user)
+        owner_clause, owner_params = build_in_clause("owner_admin_id", owner_ids)
+        sellers_sql += f" AND {owner_clause}"
+        sellers_params.extend(owner_params)
+    sellers_sql += " ORDER BY username COLLATE NOCASE ASC"
+    sellers = db.execute(sellers_sql, sellers_params).fetchall()
+
+    companies = fetch_companies(user=user, include_inactive=False)
+    courses = fetch_courses(user=user, include_inactive=False, seller_permission=None)
+    community_admins = fetch_community_admins(user=user, include_inactive=False, include_masters=False)
 
     selected_seller = None
     if filters["seller_id"]:
-        db = get_db()
         selected_seller = db.execute(
             """
             SELECT id, username, full_name
@@ -2596,6 +2811,9 @@ def dashboard_comissionamento():
         filters=filters,
         can_choose_seller=can_choose_seller,
         sellers=sellers,
+        companies=companies,
+        courses=courses,
+        community_admins=community_admins,
         selected_seller=selected_seller,
         summary=data["summary"],
         sales_rows=data["sales_rows"],
@@ -2713,8 +2931,10 @@ def save_sale():
         if payment_format == "recorrencia":
             if commission_payment_mode not in COMMISSION_PAYMENT_MODES:
                 raise ValueError("Confirme a modalidade da comissão para vendas recorrentes.")
+        elif payment_format == "parcelado":
+            commission_payment_mode = "upfront_first_installment"
         else:
-            commission_payment_mode = "per_installment"
+            commission_payment_mode = "upfront_first_installment"
         total_value = parse_float(request.form.get("total_value"), "Valor total", minimum=0.01)
         commission_percent = parse_float(
             request.form.get("commission_percent"), "Percentual de comissão", minimum=0, maximum=100
@@ -2785,6 +3005,7 @@ def save_sale():
         commission_percent=commission_percent,
         installments_count=installments_count,
         base_date=sale_date,
+        payment_format=payment_format,
         commission_payment_mode=commission_payment_mode,
     )
     total_commission_expected = round(sum(item["commission_value"] for item in installments), 2)
@@ -3086,6 +3307,66 @@ def manage_users():
         validate_csrf()
         action = clean_text(request.form.get("action"), 30)
 
+        if action == "create_simple_user":
+            if not actor_is_master:
+                flash("Somente o Administrador Mestre pode criar usuários diretos.", "error")
+                return redirect(url_for("manage_users"))
+
+            username = normalize_username(request.form.get("username"))
+            full_name = clean_text(request.form.get("full_name"), 80)
+            password = request.form.get("password") or ""
+            confirm = request.form.get("password_confirm") or ""
+
+            valid_user, user_message = validate_username(username)
+            if not valid_user:
+                flash(user_message, "error")
+                return redirect(url_for("manage_users"))
+            if len(full_name) < 3:
+                flash("Nome completo muito curto.", "error")
+                return redirect(url_for("manage_users"))
+            valid_password, password_message = validate_password(password, confirm)
+            if not valid_password:
+                flash(password_message, "error")
+                return redirect(url_for("manage_users"))
+
+            exists = db.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+            if exists:
+                flash("Usuário já existe.", "error")
+                return redirect(url_for("manage_users"))
+
+            db.execute(
+                """
+                INSERT INTO users (
+                    username,
+                    email,
+                    full_name,
+                    role,
+                    password_hash,
+                    password_plaintext,
+                    header_label,
+                    invited_by_username,
+                    invited_by_email,
+                    owner_admin_id,
+                    is_master,
+                    is_manager,
+                    is_active,
+                    created_at
+                )
+                VALUES (?, NULL, ?, 'viewer', ?, ?, NULL, ?, NULL, NULL, 0, 0, 1, ?)
+                """,
+                (
+                    username,
+                    full_name,
+                    generate_password_hash(password),
+                    password,
+                    actor["username"],
+                    now_iso(),
+                ),
+            )
+            db.commit()
+            flash("Usuário criado com sucesso. Você pode ajustar perfil e comunidade na tabela abaixo.", "success")
+            return redirect(url_for("manage_users"))
+
         if action == "create_admin":
             if not actor_is_master:
                 flash("Somente o Administrador Mestre pode criar administradores de comunidade.", "error")
@@ -3121,6 +3402,7 @@ def manage_users():
                     full_name,
                     role,
                     password_hash,
+                    password_plaintext,
                     header_label,
                     invited_by_username,
                     invited_by_email,
@@ -3130,12 +3412,13 @@ def manage_users():
                     is_active,
                     created_at
                 )
-                VALUES (?, NULL, ?, 'admin', ?, NULL, ?, NULL, NULL, 0, 0, 1, ?)
+                VALUES (?, NULL, ?, 'admin', ?, ?, NULL, ?, NULL, NULL, 0, 0, 1, ?)
                 """,
                 (
                     username,
                     full_name,
                     generate_password_hash(password),
+                    password,
                     actor["username"],
                     now_iso(),
                 ),
@@ -3160,7 +3443,7 @@ def manage_users():
         if action == "create_request":
             username = normalize_username(request.form.get("username"))
             full_name = clean_text(request.form.get("full_name"), 80)
-            desired_profile = clean_text(request.form.get("desired_profile"), 20).lower()
+            desired_profile_raw = clean_text(request.form.get("desired_profile"), 20).lower()
             referral_username = normalize_username(request.form.get("invite_username"))
             preferred_owner_admin_id = None
             if actor_is_master:
@@ -3174,7 +3457,7 @@ def manage_users():
                     flash(str(exc), "error")
                     return redirect(url_for("manage_users"))
             else:
-                preferred_owner_admin_id = get_owner_admin_id_for_user(actor)
+                preferred_owner_admin_id = None
             password = request.form.get("password") or ""
             confirm = request.form.get("password_confirm") or ""
 
@@ -3182,7 +3465,12 @@ def manage_users():
             if not valid_user:
                 flash(user_message, "error")
                 return redirect(url_for("manage_users"))
-            if desired_profile not in JOIN_REQUEST_PROFILES:
+            try:
+                desired_profile, _ = normalize_requested_profile(desired_profile_raw)
+            except ValueError:
+                flash("Perfil solicitado inválido.", "error")
+                return redirect(url_for("manage_users"))
+            if desired_profile not in ("seller", "viewer"):
                 flash("Perfil solicitado inválido.", "error")
                 return redirect(url_for("manage_users"))
             if len(full_name) < 3:
@@ -3228,9 +3516,9 @@ def manage_users():
                 return redirect(url_for("manage_users"))
 
             owner_admin_id = resolve_owner_admin_for_referral(referral, preferred_owner_admin_id)
+            request_note = None
             if owner_admin_id is None:
-                flash("Não foi possível identificar a comunidade de destino.", "error")
-                return redirect(url_for("manage_users"))
+                request_note = "Comunidade pendente de definição no momento da aprovação."
             if not actor_is_master and owner_admin_id not in actor_owner_ids:
                 flash("Você só pode criar solicitações para a sua comunidade.", "error")
                 return redirect(url_for("manage_users"))
@@ -3242,21 +3530,25 @@ def manage_users():
                     requested_full_name,
                     desired_profile,
                     password_hash,
+                    password_plaintext,
                     referral_username,
                     owner_admin_id,
+                    requested_community_id,
                     status,
                     request_note,
                     requested_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 'pendente', NULL, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'pendente', ?, ?)
                 """,
                 (
                     username,
                     full_name,
                     desired_profile,
                     generate_password_hash(password),
+                    password,
                     referral_username,
                     owner_admin_id,
+                    request_note,
                     now_iso(),
                 ),
             )
@@ -3272,7 +3564,7 @@ def manage_users():
                 return redirect(url_for("manage_users"))
 
             target = db.execute(
-                "SELECT id, username, role, is_manager, is_master, is_active, owner_admin_id FROM users WHERE id = ?",
+                "SELECT id, username, full_name, role, is_manager, is_master, is_active, owner_admin_id FROM users WHERE id = ?",
                 (user_id,),
             ).fetchone()
             if not target:
@@ -3293,6 +3585,27 @@ def manage_users():
                 return redirect(url_for("manage_users"))
 
             if actor_is_master:
+                next_username = normalize_username(request.form.get("edit_username"))
+                next_full_name = clean_text(request.form.get("edit_full_name"), 80)
+                if not next_username:
+                    next_username = target["username"]
+                if not next_full_name:
+                    next_full_name = target["full_name"]
+                valid_user, user_message = validate_username(next_username)
+                if not valid_user:
+                    flash(user_message, "error")
+                    return redirect(url_for("manage_users"))
+                if len(next_full_name) < 3:
+                    flash("Nome completo muito curto.", "error")
+                    return redirect(url_for("manage_users"))
+                if next_username != target["username"]:
+                    duplicate = db.execute(
+                        "SELECT id FROM users WHERE username = ? AND id <> ?",
+                        (next_username, user_id),
+                    ).fetchone()
+                    if duplicate:
+                        flash("Esse login já está em uso por outro usuário.", "error")
+                        return redirect(url_for("manage_users"))
                 profile_key = clean_text(request.form.get("profile"), 30).lower()
                 if profile_key not in ("master", "admin", "seller", "viewer"):
                     flash("Perfil inválido.", "error")
@@ -3307,6 +3620,8 @@ def manage_users():
                     flash(str(exc), "error")
                     return redirect(url_for("manage_users"))
             else:
+                next_username = target["username"]
+                next_full_name = target["full_name"]
                 profile_key = profile_key_from_user_row(target)
                 community_admin_id = target["owner_admin_id"]
 
@@ -3326,30 +3641,31 @@ def manage_users():
                     next_is_master = 1
                 elif profile_key == "admin":
                     next_role = "admin"
-                    next_owner_admin_id = user_id
+                    next_owner_admin_id = community_admin_id or user_id
                 else:
                     next_role = "seller" if profile_key == "seller" else "viewer"
-                    if community_admin_id is None:
-                        flash("Selecione a comunidade (admin responsável).", "error")
-                        return redirect(url_for("manage_users"))
-                    community_admin = db.execute(
-                        """
-                        SELECT id
-                        FROM users
-                        WHERE id = ?
-                          AND role = 'admin'
-                          AND COALESCE(is_master, 0) = 0
-                          AND is_active = 1
-                        """,
-                        (community_admin_id,),
-                    ).fetchone()
-                    if not community_admin:
-                        flash("Comunidade inválida.", "error")
-                        return redirect(url_for("manage_users"))
-                    next_owner_admin_id = community_admin["id"]
+                    if community_admin_id is not None:
+                        community_admin = db.execute(
+                            """
+                            SELECT id
+                            FROM users
+                            WHERE id = ?
+                              AND role = 'admin'
+                              AND COALESCE(is_master, 0) = 0
+                              AND is_active = 1
+                            """,
+                            (community_admin_id,),
+                        ).fetchone()
+                        if not community_admin:
+                            flash("Comunidade inválida.", "error")
+                            return redirect(url_for("manage_users"))
+                        next_owner_admin_id = community_admin["id"]
+                    else:
+                        next_owner_admin_id = None
 
                 if next_role == "admin" and next_is_master == 0:
-                    next_owner_admin_id = user_id
+                    if next_owner_admin_id is None:
+                        next_owner_admin_id = user_id
                 if next_is_master == 1:
                     next_owner_admin_id = None
             else:
@@ -3383,7 +3699,9 @@ def manage_users():
             db.execute(
                 """
                 UPDATE users
-                SET role = ?,
+                SET username = ?,
+                    full_name = ?,
+                    role = ?,
                     is_manager = ?,
                     is_master = ?,
                     owner_admin_id = ?,
@@ -3395,6 +3713,8 @@ def manage_users():
                 WHERE id = ?
                 """,
                 (
+                    next_username,
+                    next_full_name,
                     next_role,
                     next_is_manager,
                     next_is_master,
@@ -3424,7 +3744,10 @@ def manage_users():
                     flash(password_message, "error")
                     db.rollback()
                     return redirect(url_for("manage_users"))
-                db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (generate_password_hash(new_password), user_id))
+                db.execute(
+                    "UPDATE users SET password_hash = ?, password_plaintext = ? WHERE id = ?",
+                    (generate_password_hash(new_password), new_password, user_id),
+                )
 
             db.commit()
             flash("Alterações do usuário salvas.", "success")
@@ -3492,32 +3815,32 @@ def manage_users():
             elif profile_key == "admin":
                 next_role = "admin"
                 next_is_master = 0
-                next_owner_admin_id = user_id
+                next_owner_admin_id = community_admin_id or user_id
             else:
                 if profile_key == "seller":
                     next_role = "seller"
                 else:
                     next_role = "viewer"
-                if community_admin_id is None:
-                    flash("Selecione a comunidade (admin responsável).", "error")
-                    return redirect(url_for("manage_users"))
-                community_admin = db.execute(
-                    """
-                    SELECT id, username
-                    FROM users
-                    WHERE id = ?
-                      AND role = 'admin'
-                      AND COALESCE(is_master, 0) = 0
-                    """,
-                    (community_admin_id,),
-                ).fetchone()
-                if not community_admin:
-                    flash("Comunidade inválida.", "error")
-                    return redirect(url_for("manage_users"))
-                next_owner_admin_id = community_admin["id"]
+                if community_admin_id is not None:
+                    community_admin = db.execute(
+                        """
+                        SELECT id, username
+                        FROM users
+                        WHERE id = ?
+                          AND role = 'admin'
+                          AND COALESCE(is_master, 0) = 0
+                        """,
+                        (community_admin_id,),
+                    ).fetchone()
+                    if not community_admin:
+                        flash("Comunidade inválida.", "error")
+                        return redirect(url_for("manage_users"))
+                    next_owner_admin_id = community_admin["id"]
+                else:
+                    next_owner_admin_id = None
 
             if next_role == "admin":
-                if next_is_master == 0:
+                if next_is_master == 0 and next_owner_admin_id is None:
                     next_owner_admin_id = user_id
 
             db.execute(
@@ -3624,7 +3947,10 @@ def manage_users():
                 flash(password_message, "error")
                 return redirect(url_for("manage_users"))
 
-            db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (generate_password_hash(new_password), user_id))
+            db.execute(
+                "UPDATE users SET password_hash = ?, password_plaintext = ? WHERE id = ?",
+                (generate_password_hash(new_password), new_password, user_id),
+            )
             db.commit()
             flash("Senha atualizada.", "success")
             return redirect(url_for("manage_users"))
@@ -3819,11 +4145,13 @@ def manage_users():
       u.role,
       u.is_manager,
       u.is_master,
+      u.password_plaintext,
       u.invited_by_username,
       u.owner_admin_id,
       u.is_active,
       u.created_at,
-      owner.full_name AS owner_admin_name
+      owner.full_name AS owner_admin_name,
+      owner.username AS owner_admin_username
     FROM users u
     LEFT JOIN users owner ON owner.id = u.owner_admin_id
     """
@@ -3878,7 +4206,7 @@ def manage_users():
     seller_course_permissions = []
     if can_manage_seller_permissions:
         sellers_sql = """
-        SELECT id, full_name, owner_admin_id
+        SELECT id, full_name, username, owner_admin_id
         FROM users
         WHERE role = 'seller'
           AND COALESCE(is_manager, 0) = 0
@@ -3900,7 +4228,7 @@ def manage_users():
           p.can_launch_sales,
           p.can_edit_sales,
           p.can_edit_course,
-          u.full_name AS seller_name,
+          u.username AS seller_name,
           c.name AS course_name,
           comp.name AS company_name,
           comp.owner_admin_id
@@ -3921,7 +4249,7 @@ def manage_users():
             owner_clause_permissions, owner_params_permissions = build_in_clause("comp.owner_admin_id", actor_owner_ids)
             permissions_sql += f" AND {owner_clause_permissions}"
             permissions_params.extend(owner_params_permissions)
-        sellers_sql += " ORDER BY full_name COLLATE NOCASE ASC"
+        sellers_sql += " ORDER BY username COLLATE NOCASE ASC"
         courses_sql += " ORDER BY comp.name COLLATE NOCASE ASC, c.name COLLATE NOCASE ASC"
         permissions_sql += " ORDER BY seller_name COLLATE NOCASE ASC, company_name COLLATE NOCASE ASC, course_name COLLATE NOCASE ASC"
         manageable_sellers = db.execute(sellers_sql, sellers_params).fetchall()
@@ -3931,6 +4259,7 @@ def manage_users():
         "users.html",
         users=users,
         actor_is_master=actor_is_master,
+        can_export_credentials=actor_is_master,
         community_admins=community_admins,
         membership_target_users=membership_target_users,
         user_memberships=user_memberships,
@@ -3938,6 +4267,50 @@ def manage_users():
         manageable_sellers=manageable_sellers,
         manageable_courses=manageable_courses,
         seller_course_permissions=seller_course_permissions,
+    )
+
+
+@app.get("/admin/users/export-credenciais")
+@login_required
+def export_user_credentials():
+    actor = current_user()
+    if not is_master_user(actor):
+        abort(403)
+    if Workbook is None:
+        flash("Instale openpyxl para exportar credenciais.", "error")
+        return redirect(url_for("manage_users"))
+
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT full_name, username, COALESCE(password_plaintext, '') AS password_plaintext
+        FROM users
+        ORDER BY full_name COLLATE NOCASE ASC
+        """
+    ).fetchall()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Credenciais"
+    ws.append(["Nome completo", "Login", "Senha"])
+    for row in rows:
+        ws.append(
+            [
+                row["full_name"],
+                row["username"],
+                row["password_plaintext"] or "Não disponível (defina nova senha)",
+            ]
+        )
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    filename = f"credenciais_usuarios_{date.today().isoformat()}.xlsx"
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
 
@@ -3975,9 +4348,12 @@ def user_access_requests():
         if req["status"] != "pendente":
             flash("Esta solicitação já foi analisada.", "error")
             return redirect(url_for("user_access_requests"))
-        if not actor_is_master and req["owner_admin_id"] not in actor_owner_ids:
-            flash("Sem permissão para analisar solicitação de outra comunidade.", "error")
-            return redirect(url_for("user_access_requests"))
+        if not actor_is_master:
+            owner_matches_scope = req["owner_admin_id"] in actor_owner_ids if req["owner_admin_id"] is not None else False
+            referral_matches_actor = req["referral_username"] == actor["username"]
+            if not owner_matches_scope and not referral_matches_actor:
+                flash("Sem permissão para analisar solicitação de outra comunidade.", "error")
+                return redirect(url_for("user_access_requests"))
 
         if action == "deny":
             db.execute(
@@ -4011,39 +4387,73 @@ def user_access_requests():
                 db.commit()
                 return redirect(url_for("user_access_requests"))
 
+            owner_admin_id = req["owner_admin_id"]
+            try:
+                selected_owner_admin_id = parse_int(
+                    request.form.get("owner_admin_id"),
+                    "Comunidade",
+                    allow_empty=True,
+                )
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("user_access_requests"))
+            if selected_owner_admin_id is not None:
+                owner_admin = db.execute(
+                    """
+                    SELECT id
+                    FROM users
+                    WHERE id = ?
+                      AND role = 'admin'
+                      AND is_active = 1
+                    """,
+                    (selected_owner_admin_id,),
+                ).fetchone()
+                if not owner_admin:
+                    flash("Comunidade de destino inválida.", "error")
+                    return redirect(url_for("user_access_requests"))
+                owner_admin_id = owner_admin["id"]
+            if not actor_is_master:
+                if owner_admin_id is None:
+                    owner_admin_id = get_owner_admin_id_for_user(actor)
+                if owner_admin_id not in actor_owner_ids:
+                    flash("Sem permissão para aprovar para esta comunidade.", "error")
+                    return redirect(url_for("user_access_requests"))
+
             user_cursor = db.execute(
                 """
                 INSERT INTO users (
-                    username, full_name, role, password_hash, header_label,
+                    username, full_name, role, password_hash, password_plaintext, header_label,
                     invited_by_username, invited_by_email, owner_admin_id,
                     is_master, is_manager, is_active, created_at
                 )
-                VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, 0, ?, 1, ?)
+                VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, ?, 0, ?, 1, ?)
                 """,
                 (
                     req["requested_username"],
                     req["requested_full_name"],
                     role,
                     req["password_hash"],
+                    req["password_plaintext"],
                     req["referral_username"],
-                    req["owner_admin_id"],
+                    owner_admin_id,
                     is_manager,
                     now_iso(),
                 ),
             )
-            db.execute(
-                """
-                INSERT INTO user_community_memberships (user_id, owner_admin_id, is_active, created_at, updated_at)
-                VALUES (?, ?, 1, ?, ?)
-                ON CONFLICT(user_id, owner_admin_id)
-                DO UPDATE SET is_active = 1, updated_at = excluded.updated_at
-                """,
-                (user_cursor.lastrowid, req["owner_admin_id"], now_iso(), now_iso()),
-            )
-            if role == "seller" and not is_manager:
+            if owner_admin_id is not None:
+                db.execute(
+                    """
+                    INSERT INTO user_community_memberships (user_id, owner_admin_id, is_active, created_at, updated_at)
+                    VALUES (?, ?, 1, ?, ?)
+                    ON CONFLICT(user_id, owner_admin_id)
+                    DO UPDATE SET is_active = 1, updated_at = excluded.updated_at
+                    """,
+                    (user_cursor.lastrowid, owner_admin_id, now_iso(), now_iso()),
+                )
+            if role == "seller" and not is_manager and owner_admin_id is not None:
                 seed_seller_course_permissions(
                     user_cursor.lastrowid,
-                    req["owner_admin_id"],
+                    owner_admin_id,
                     can_launch_sales=0,
                     can_edit_sales=0,
                     can_edit_course=0,
@@ -4054,28 +4464,47 @@ def user_access_requests():
                 SET status = 'aprovado',
                     reviewed_at = ?,
                     reviewed_by = ?,
+                    owner_admin_id = ?,
                     decision_note = ?
                 WHERE id = ?
                 """,
-                (now_iso(), actor["id"], clean_text(request.form.get("decision_note"), 200), request_id),
+                (
+                    now_iso(),
+                    actor["id"],
+                    owner_admin_id,
+                    clean_text(request.form.get("decision_note"), 200),
+                    request_id,
+                ),
             )
             db.commit()
             flash("Solicitação aprovada e usuário criado.", "success")
             return redirect(url_for("user_access_requests"))
 
     sql = """
-    SELECT r.*, reviewer.full_name AS reviewer_name
+    SELECT
+      r.*,
+      reviewer.full_name AS reviewer_name,
+      owner.username AS owner_admin_username,
+      owner.full_name AS owner_admin_full_name
     FROM user_access_requests r
     LEFT JOIN users reviewer ON reviewer.id = r.reviewed_by
+    LEFT JOIN users owner ON owner.id = r.owner_admin_id
     """
     params = []
     if not actor_is_master:
         owner_clause, owner_params = build_in_clause("r.owner_admin_id", actor_owner_ids)
-        sql += f" WHERE {owner_clause}"
+        sql += f" WHERE ({owner_clause} OR r.referral_username = ?)"
         params.extend(owner_params)
+        params.append(actor["username"])
     sql += " ORDER BY CASE r.status WHEN 'pendente' THEN 0 WHEN 'aprovado' THEN 1 ELSE 2 END, r.requested_at DESC"
     requests_rows = db.execute(sql, params).fetchall()
-    return render_template("user_access_requests.html", requests=requests_rows)
+    community_admins = fetch_community_admins(user=actor, include_inactive=False, include_masters=False)
+    return render_template(
+        "user_access_requests.html",
+        requests=requests_rows,
+        community_admins=community_admins,
+        actor_is_master=actor_is_master,
+    )
 
 
 @app.get("/admin/master-features")
@@ -4121,28 +4550,30 @@ def manage_communities():
                 flash("Nome da comunidade inválido.", "error")
                 return redirect(url_for("manage_communities"))
             try:
-                owner_admin_id = parse_int(request.form.get("owner_admin_id"), "Administrador da comunidade")
+                owner_admin_id = parse_int(
+                    request.form.get("owner_admin_id"),
+                    "Administrador da comunidade",
+                    allow_empty=True,
+                )
             except ValueError as exc:
                 flash(str(exc), "error")
                 return redirect(url_for("manage_communities"))
 
-            owner_admin = db.execute(
-                """
-                SELECT id
-                FROM users
-                WHERE id = ?
-                  AND role = 'admin'
-                  AND is_active = 1
-                """,
-                (owner_admin_id,),
-            ).fetchone()
-            if not owner_admin:
-                flash("Administrador da comunidade inválido.", "error")
-                return redirect(url_for("manage_communities"))
-            duplicate_owner = db.execute("SELECT id FROM communities WHERE owner_admin_id = ?", (owner_admin_id,)).fetchone()
-            if duplicate_owner:
-                flash("Este admin já possui comunidade cadastrada.", "error")
-                return redirect(url_for("manage_communities"))
+            if owner_admin_id is not None:
+                owner_admin = db.execute(
+                    """
+                    SELECT id
+                    FROM users
+                    WHERE id = ?
+                      AND role = 'admin'
+                      AND COALESCE(is_master, 0) = 0
+                      AND is_active = 1
+                    """,
+                    (owner_admin_id,),
+                ).fetchone()
+                if not owner_admin:
+                    flash("Administrador da comunidade inválido.", "error")
+                    return redirect(url_for("manage_communities"))
 
             now = now_iso()
             db.execute(
@@ -4152,16 +4583,16 @@ def manage_communities():
                 """,
                 (name, owner_admin_id, None, now, now),
             )
-            db.execute("UPDATE users SET owner_admin_id = ? WHERE id = ?", (owner_admin_id, owner_admin_id))
-            db.execute(
-                """
-                INSERT INTO user_community_memberships (user_id, owner_admin_id, is_active, created_at, updated_at)
-                VALUES (?, ?, 1, ?, ?)
-                ON CONFLICT(user_id, owner_admin_id)
-                DO UPDATE SET is_active = 1, updated_at = excluded.updated_at
-                """,
-                (owner_admin_id, owner_admin_id, now, now),
-            )
+            if owner_admin_id is not None:
+                db.execute(
+                    """
+                    INSERT INTO user_community_memberships (user_id, owner_admin_id, is_active, created_at, updated_at)
+                    VALUES (?, ?, 1, ?, ?)
+                    ON CONFLICT(user_id, owner_admin_id)
+                    DO UPDATE SET is_active = 1, updated_at = excluded.updated_at
+                    """,
+                    (owner_admin_id, owner_admin_id, now, now),
+                )
             db.commit()
             flash("Comunidade criada.", "success")
             return redirect(url_for("manage_communities"))
@@ -4173,11 +4604,24 @@ def manage_communities():
                 flash(str(exc), "error")
                 return redirect(url_for("manage_communities"))
             name = clean_text(request.form.get("name"), 120)
-            manager_user_id = parse_int(
-                request.form.get("manager_user_id"),
-                "Responsável comercial",
-                allow_empty=True,
-            )
+            try:
+                owner_admin_id = parse_int(
+                    request.form.get("owner_admin_id"),
+                    "Administrador da comunidade",
+                    allow_empty=True,
+                )
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("manage_communities"))
+            try:
+                manager_user_id = parse_int(
+                    request.form.get("manager_user_id"),
+                    "Responsável comercial",
+                    allow_empty=True,
+                )
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("manage_communities"))
             desired_active_raw = (request.form.get("is_active") or "").strip()
             if desired_active_raw not in ("0", "1"):
                 flash("Status da comunidade inválido.", "error")
@@ -4191,6 +4635,21 @@ def manage_communities():
             if len(name) < 2:
                 flash("Nome da comunidade inválido.", "error")
                 return redirect(url_for("manage_communities"))
+            if owner_admin_id is not None:
+                owner_admin = db.execute(
+                    """
+                    SELECT id
+                    FROM users
+                    WHERE id = ?
+                      AND role = 'admin'
+                      AND COALESCE(is_master, 0) = 0
+                      AND is_active = 1
+                    """,
+                    (owner_admin_id,),
+                ).fetchone()
+                if not owner_admin:
+                    flash("Administrador da comunidade inválido.", "error")
+                    return redirect(url_for("manage_communities"))
             if manager_user_id is not None:
                 manager = db.execute(
                     """
@@ -4201,7 +4660,7 @@ def manage_communities():
                       AND COALESCE(is_manager, 0) = 1
                       AND owner_admin_id = ?
                     """,
-                    (manager_user_id, community["owner_admin_id"]),
+                    (manager_user_id, owner_admin_id),
                 ).fetchone()
                 if not manager:
                     flash("Responsável comercial inválido para esta comunidade.", "error")
@@ -4210,11 +4669,21 @@ def manage_communities():
             db.execute(
                 """
                 UPDATE communities
-                SET name = ?, manager_user_id = ?, is_active = ?, updated_at = ?
+                SET name = ?, owner_admin_id = ?, manager_user_id = ?, is_active = ?, updated_at = ?
                 WHERE id = ?
                 """,
-                (name, manager_user_id, desired_active, now_iso(), community_id),
+                (name, owner_admin_id, manager_user_id, desired_active, now_iso(), community_id),
             )
+            if owner_admin_id is not None:
+                db.execute(
+                    """
+                    INSERT INTO user_community_memberships (user_id, owner_admin_id, is_active, created_at, updated_at)
+                    VALUES (?, ?, 1, ?, ?)
+                    ON CONFLICT(user_id, owner_admin_id)
+                    DO UPDATE SET is_active = 1, updated_at = excluded.updated_at
+                    """,
+                    (owner_admin_id, owner_admin_id, now_iso(), now_iso()),
+                )
             db.commit()
             flash("Alterações da comunidade salvas.", "success")
             return redirect(url_for("manage_communities"))
@@ -4226,11 +4695,24 @@ def manage_communities():
                 flash(str(exc), "error")
                 return redirect(url_for("manage_communities"))
             name = clean_text(request.form.get("name"), 120)
-            manager_user_id = parse_int(
-                request.form.get("manager_user_id"),
-                "Responsável comercial",
-                allow_empty=True,
-            )
+            try:
+                owner_admin_id = parse_int(
+                    request.form.get("owner_admin_id"),
+                    "Administrador da comunidade",
+                    allow_empty=True,
+                )
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("manage_communities"))
+            try:
+                manager_user_id = parse_int(
+                    request.form.get("manager_user_id"),
+                    "Responsável comercial",
+                    allow_empty=True,
+                )
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("manage_communities"))
             community = db.execute("SELECT id, owner_admin_id FROM communities WHERE id = ?", (community_id,)).fetchone()
             if not community:
                 flash("Comunidade não encontrada.", "error")
@@ -4238,6 +4720,21 @@ def manage_communities():
             if len(name) < 2:
                 flash("Nome da comunidade inválido.", "error")
                 return redirect(url_for("manage_communities"))
+            if owner_admin_id is not None:
+                owner_admin = db.execute(
+                    """
+                    SELECT id
+                    FROM users
+                    WHERE id = ?
+                      AND role = 'admin'
+                      AND COALESCE(is_master, 0) = 0
+                      AND is_active = 1
+                    """,
+                    (owner_admin_id,),
+                ).fetchone()
+                if not owner_admin:
+                    flash("Administrador da comunidade inválido.", "error")
+                    return redirect(url_for("manage_communities"))
             if manager_user_id is not None:
                 manager = db.execute(
                     """
@@ -4248,7 +4745,7 @@ def manage_communities():
                       AND COALESCE(is_manager, 0) = 1
                       AND owner_admin_id = ?
                     """,
-                    (manager_user_id, community["owner_admin_id"]),
+                    (manager_user_id, owner_admin_id),
                 ).fetchone()
                 if not manager:
                     flash("Responsável comercial inválido para esta comunidade.", "error")
@@ -4257,10 +4754,10 @@ def manage_communities():
             db.execute(
                 """
                 UPDATE communities
-                SET name = ?, manager_user_id = ?, updated_at = ?
+                SET name = ?, owner_admin_id = ?, manager_user_id = ?, updated_at = ?
                 WHERE id = ?
                 """,
-                (name, manager_user_id, now_iso(), community_id),
+                (name, owner_admin_id, manager_user_id, now_iso(), community_id),
             )
             db.commit()
             flash("Comunidade atualizada.", "success")
@@ -4285,13 +4782,13 @@ def manage_communities():
             return redirect(url_for("manage_communities"))
 
     communities = fetch_communities(user=actor, include_inactive=True)
-    community_admins = fetch_community_admins(user=actor, include_inactive=False, include_masters=True)
+    community_admins = fetch_community_admins(user=actor, include_inactive=False, include_masters=False)
     managers = db.execute(
         """
-        SELECT id, full_name, owner_admin_id
+        SELECT id, full_name, username, owner_admin_id
         FROM users
         WHERE role = 'seller' AND COALESCE(is_manager, 0) = 1 AND is_active = 1
-        ORDER BY full_name COLLATE NOCASE ASC
+        ORDER BY username COLLATE NOCASE ASC
         """
     ).fetchall()
     return render_template(

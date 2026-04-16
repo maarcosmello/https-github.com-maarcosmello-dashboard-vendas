@@ -10,16 +10,16 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>
       Usuário
-      <input type="text" name="username" required>
+      <input type="text" name="username" minlength="3" maxlength="8" placeholder="login" required>
     </label>
     <label>
       Senha
-      <input type="password" name="password" maxlength="8" required>
+      <input type="password" name="password" minlength="3" maxlength="8" placeholder="••••••••" required>
     </label>
     <button class="btn btn-primary" type="submit">Entrar</button>
   </form>
   <p class="muted small"><a href="{{ url_for('forgot_password') }}">Esqueci minha senha</a></p>
   <p class="muted small"><a href="{{ url_for('request_access') }}">Solicitar acesso</a></p>
-  <p class="muted small">Primeiro acesso? Configure o administrador inicial em <a href="{{ url_for('setup_admin') }}">setup-admin</a>.</p>
+  <p class="muted small">Regra de acesso: login e senha devem ter de 3 a 8 caracteres.</p>
 </section>
 {% endblock %}

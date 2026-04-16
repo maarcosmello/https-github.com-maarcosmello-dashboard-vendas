@@ -18,6 +18,35 @@
         Data final da venda
         <input type="date" name="sale_date_end" value="{{ filters.sale_date_end }}">
       </label>
+      <label>
+        Comunidade
+        <select name="owner_admin_id">
+          <option value="">Todas</option>
+          {% for admin in community_admins %}
+          <option value="{{ admin.id }}" {% if filters.owner_admin_id == admin.id %}selected{% endif %}>
+            {{ admin.username }} - {{ admin.full_name }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Empresa
+        <select name="company_id">
+          <option value="">Todas</option>
+          {% for company in companies %}
+          <option value="{{ company.id }}" {% if filters.company_id == company.id %}selected{% endif %}>{{ company.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Curso
+        <select name="course_id">
+          <option value="">Todos</option>
+          {% for course in courses %}
+          <option value="{{ course.id }}" {% if filters.course_id == course.id %}selected{% endif %}>{{ course.company_name }} - {{ course.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
       {% if can_choose_seller %}
       <label>
         Vendedor (login)
@@ -375,4 +404,3 @@
   })();
 </script>
 {% endblock %}
-

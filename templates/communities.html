@@ -12,18 +12,19 @@
     <form method="post" class="grid-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="action" value="create">
-      <label>Nome da comunidade<input type="text" name="name" required></label>
+      <label>Nome da comunidade<input type="text" name="name" placeholder="nome da comunidade" required></label>
       <label>
-        Admin responsável
-        <select name="owner_admin_id" required>
-          <option value="">Selecione</option>
+        Admin principal (opcional)
+        <select name="owner_admin_id">
+          <option value="">Sem admin principal</option>
           {% for admin in community_admins %}
-          <option value="{{ admin.id }}">{{ admin.full_name }} ({{ admin.username }}){% if admin.is_master %} - Mestre{% endif %}</option>
+          <option value="{{ admin.id }}">{{ admin.username }} - {{ admin.full_name }}</option>
           {% endfor %}
         </select>
       </label>
       <button class="btn btn-primary" type="submit">Criar comunidade</button>
     </form>
+    <p class="muted small">Você pode criar a comunidade apenas com o nome e vincular admins depois.</p>
   </article>
 
   <article class="panel full-span">
@@ -35,7 +36,7 @@
         <thead>
           <tr>
             <th>Comunidade</th>
-            <th>Admin</th>
+            <th>Admin principal</th>
             <th>Responsável comercial</th>
             <th>Status</th>
             <th>Ações</th>
@@ -46,7 +47,13 @@
             {% for community in communities %}
             <tr>
               <td>{{ community.name }}</td>
-              <td>{{ community.owner_admin_name }} ({{ community.owner_admin_username }})</td>
+              <td>
+                {% if community.owner_admin_username %}
+                  {{ community.owner_admin_username }} - {{ community.owner_admin_name }}
+                {% else %}
+                  Sem admin principal
+                {% endif %}
+              </td>
               <td>{{ community.manager_name or '-' }}</td>
               <td>{{ 'Ativa' if community.is_active else 'Inativa' }}</td>
               <td>
@@ -54,12 +61,20 @@
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="action" value="save_changes">
                   <input type="hidden" name="community_id" value="{{ community.id }}">
-                  <input type="text" name="name" value="{{ community.name }}" required>
+                  <input type="text" name="name" value="{{ community.name }}" placeholder="nome da comunidade" required>
+                  <select name="owner_admin_id">
+                    <option value="">Sem admin principal</option>
+                    {% for admin in community_admins %}
+                    <option value="{{ admin.id }}" {% if community.owner_admin_id == admin.id %}selected{% endif %}>
+                      {{ admin.username }} - {{ admin.full_name }}
+                    </option>
+                    {% endfor %}
+                  </select>
                   <select name="manager_user_id">
                     <option value="">Sem responsável comercial</option>
                     {% for manager in managers %}
                     <option value="{{ manager.id }}" {% if community.manager_user_id == manager.id %}selected{% endif %}>
-                      {{ manager.full_name }}
+                      {{ manager.username }} - {{ manager.full_name }}
                     </option>
                     {% endfor %}
                   </select>
