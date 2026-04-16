@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Comunidade | Comissionamento{% endblock %}
+
+{% block content %}
+<section class="layout">
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Usuários da comunidade</h2>
+      <span class="section-badge">Visualização de hierarquia</span>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Login</th>
+            <th>Nome</th>
+            <th>Perfil</th>
+            <th>Comunidade</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if users %}
+            {% for user in users %}
+            <tr>
+              <td>{{ user.username }}</td>
+              <td>{{ user.full_name }}</td>
+              <td>
+                {% if user.role == 'admin' and user.is_master %}
+                  Administrador Mestre
+                {% elif user.role == 'admin' %}
+                  Administrador
+                {% elif user.role == 'seller' %}
+                  Vendedor
+                {% else %}
+                  Visualizador
+                {% endif %}
+              </td>
+              <td>{{ community_scope_labels.get(user.owner_admin_id, '-') if user.owner_admin_id else '-' }}</td>
+              <td>{{ 'Ativo' if user.is_active else 'Inativo' }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="5" class="muted">Nenhum usuário encontrado no escopo desta comunidade.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

@@ -36,11 +36,7 @@
               </td>
               <td>{{ req.referral_username }}</td>
               <td>
-                {% if req.owner_admin_id and req.owner_admin_username %}
-                  {{ req.owner_admin_username }} - {{ req.owner_admin_full_name }}
-                {% else %}
-                  Pendente
-                {% endif %}
+                {{ community_scope_labels.get(req.owner_admin_id, 'Pendente') if req.owner_admin_id else 'Pendente' }}
               </td>
               <td>{{ req.status }}</td>
               <td>{{ req.reviewer_name or '-' }}</td>
@@ -53,8 +49,8 @@
                     <input type="hidden" name="request_id" value="{{ req.id }}">
                     <select name="owner_admin_id">
                       <option value="">Comunidade automática</option>
-                      {% for admin in community_admins %}
-                      <option value="{{ admin.id }}" {% if req.owner_admin_id == admin.id %}selected{% endif %}>{{ admin.username }} - {{ admin.full_name }}</option>
+                      {% for option in community_scope_options %}
+                      <option value="{{ option.owner_admin_id }}" {% if req.owner_admin_id == option.owner_admin_id %}selected{% endif %}>{{ option.label }}</option>
                       {% endfor %}
                     </select>
                     <input type="text" name="decision_note" placeholder="Observação (opcional)">

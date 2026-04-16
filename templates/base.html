@@ -31,6 +31,9 @@
         <a class="mini-link {% if current_ep in ['dashboard'] %}active{% endif %}" href="{{ url_for('dashboard') }}">Dashboard</a>
         <a class="mini-link {% if current_ep in ['dashboard_recorrencia'] %}active{% endif %}" href="{{ url_for('dashboard_recorrencia') }}">Recorrência</a>
         <a class="mini-link {% if current_ep in ['dashboard_comissionamento'] %}active{% endif %}" href="{{ url_for('dashboard_comissionamento') }}">Comissionamento</a>
+        {% if current_user.role in ['admin', 'seller'] %}
+        <a class="mini-link {% if current_ep in ['community_users'] %}active{% endif %}" href="{{ url_for('community_users') }}">Comunidade</a>
+        {% endif %}
         <a class="mini-link" href="{{ url_for('download_manual_usuario') }}">Manual do Usuário</a>
         {% if current_user.role == 'viewer' %}
         <a class="mini-link {% if current_ep in ['viewer_course_access'] %}active{% endif %}" href="{{ url_for('viewer_course_access') }}">Meus Cursos</a>
@@ -48,11 +51,6 @@
         {% elif current_user.role == 'seller' %}
         <a class="mini-link {% if current_ep in ['manage_courses'] %}active{% endif %}" href="{{ url_for('manage_courses') }}">Cursos</a>
         {% endif %}
-        <form method="post" action="{{ url_for('update_header_label') }}" class="inline-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="text" name="header_label" placeholder="Nome da sua empresa" value="{{ current_user.header_label or '' }}">
-          <button class="mini-btn" type="submit">Salvar título</button>
-        </form>
         <form method="post" action="{{ url_for('logout') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button class="btn btn-secondary" type="submit">Sair</button>

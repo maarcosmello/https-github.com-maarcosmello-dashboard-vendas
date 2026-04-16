@@ -18,7 +18,7 @@
         <select name="owner_admin_id">
           <option value="">Sem admin principal</option>
           {% for admin in community_admins %}
-          <option value="{{ admin.id }}">{{ admin.username }} - {{ admin.full_name }}</option>
+          <option value="{{ admin.id }}">{{ admin.username }}</option>
           {% endfor %}
         </select>
       </label>
@@ -37,6 +37,7 @@
           <tr>
             <th>Comunidade</th>
             <th>Admin principal</th>
+            <th>Admins adicionais</th>
             <th>Responsável comercial</th>
             <th>Status</th>
             <th>Ações</th>
@@ -49,9 +50,32 @@
               <td>{{ community.name }}</td>
               <td>
                 {% if community.owner_admin_username %}
-                  {{ community.owner_admin_username }} - {{ community.owner_admin_name }}
+                  {{ community.owner_admin_username }}
                 {% else %}
                   Sem admin principal
+                {% endif %}
+              </td>
+              <td>
+                {% if community.owner_admin_id %}
+                  {% set extra_admins = additional_admins_by_owner.get(community.owner_admin_id, []) %}
+                  {% if extra_admins %}
+                    {% for extra in extra_admins %}
+                    <div class="row-actions" style="margin-bottom:6px;">
+                      <span class="muted">{{ extra.admin_username }}</span>
+                      <form method="post" class="inline-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="action" value="remove_admin">
+                        <input type="hidden" name="community_id" value="{{ community.id }}">
+                        <input type="hidden" name="admin_user_id" value="{{ extra.admin_id }}">
+                        <button class="mini-btn delete" type="submit">Remover</button>
+                      </form>
+                    </div>
+                    {% endfor %}
+                  {% else %}
+                    <span class="muted">Sem adicionais</span>
+                  {% endif %}
+                {% else %}
+                  <span class="muted">Defina admin principal</span>
                 {% endif %}
               </td>
               <td>{{ community.manager_name or '-' }}</td>
@@ -66,7 +90,7 @@
                     <option value="">Sem admin principal</option>
                     {% for admin in community_admins %}
                     <option value="{{ admin.id }}" {% if community.owner_admin_id == admin.id %}selected{% endif %}>
-                      {{ admin.username }} - {{ admin.full_name }}
+                      {{ admin.username }}
                     </option>
                     {% endfor %}
                   </select>
@@ -84,12 +108,34 @@
                   </select>
                   <button class="mini-btn" type="submit">Salvar alterações</button>
                 </form>
+                {% if community.owner_admin_id %}
+                <form method="post" class="row-actions" style="margin-top:6px;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="add_admin">
+                  <input type="hidden" name="community_id" value="{{ community.id }}">
+                  <select name="admin_user_id" required>
+                    <option value="">Adicionar admin</option>
+                    {% for admin in community_admins %}
+                    {% if admin.id != community.owner_admin_id %}
+                    <option value="{{ admin.id }}">{{ admin.username }}</option>
+                    {% endif %}
+                    {% endfor %}
+                  </select>
+                  <button class="mini-btn" type="submit">Adicionar</button>
+                </form>
+                {% endif %}
+                <form method="post" class="inline-form" onsubmit="return confirm('Tem certeza que deseja excluir esta comunidade?');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="community_id" value="{{ community.id }}">
+                  <button class="mini-btn delete" type="submit">Excluir</button>
+                </form>
               </td>
             </tr>
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="5" class="muted">Nenhuma comunidade cadastrada.</td>
+              <td colspan="6" class="muted">Nenhuma comunidade cadastrada.</td>
             </tr>
           {% endif %}
         </tbody>

@@ -27,8 +27,12 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 try:
     from openpyxl import Workbook
+    from openpyxl.chart import BarChart, LineChart, Reference
 except ImportError:
     Workbook = None
+    BarChart = None
+    LineChart = None
+    Reference = None
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -1276,10 +1280,7 @@ def validate_csrf():
 @app.context_processor
 def inject_globals():
     user = current_user()
-    default_header = "Sistema de Comissionamento"
-    header_label = default_header
-    if user and user["header_label"]:
-        header_label = user["header_label"]
+    header_label = get_header_label_for_user(user)
     return {
         "current_user": user,
         "role_labels": ROLE_LABELS,
@@ -1632,7 +1633,20 @@ def has_active_admin():
 def fetch_companies(user=None, include_inactive=False):
     db = get_db()
     sql = """
-    SELECT c.id, c.name, c.owner_admin_id, c.is_active, owner.full_name AS owner_admin_name
+    SELECT
+      c.id,
+      c.name,
+      c.owner_admin_id,
+      c.is_active,
+      owner.full_name AS owner_admin_name,
+      owner.username AS owner_admin_username,
+      (
+        SELECT cm.name
+        FROM communities cm
+        WHERE cm.owner_admin_id = c.owner_admin_id
+        ORDER BY cm.is_active DESC, cm.id ASC
+        LIMIT 1
+      ) AS community_name
     FROM companies c
     LEFT JOIN users owner ON owner.id = c.owner_admin_id
     """
@@ -1789,7 +1803,18 @@ def fetch_communities(user=None, include_inactive=True):
         WHERE c.owner_admin_id IS NOT NULL
           AND r.owner_admin_id = c.owner_admin_id
           AND r.status = 'pendente'
-      ) AS pending_requests_count
+      ) AS pending_requests_count,
+      (
+        SELECT GROUP_CONCAT(u.username, ', ')
+        FROM user_community_memberships m
+        INNER JOIN users u ON u.id = m.user_id
+        WHERE c.owner_admin_id IS NOT NULL
+          AND m.owner_admin_id = c.owner_admin_id
+          AND m.is_active = 1
+          AND u.role = 'admin'
+          AND COALESCE(u.is_master, 0) = 0
+          AND u.id <> c.owner_admin_id
+      ) AS additional_admin_logins
     FROM communities c
     LEFT JOIN users admin ON admin.id = c.owner_admin_id
     LEFT JOIN users manager ON manager.id = c.manager_user_id
@@ -1807,6 +1832,89 @@ def fetch_communities(user=None, include_inactive=True):
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY c.name COLLATE NOCASE ASC"
     return db.execute(sql, params).fetchall()
+
+
+def fetch_owner_scope_options(user=None, include_inactive=False, include_without_community=False):
+    db = get_db()
+    sql = """
+    SELECT
+      admin.id AS owner_admin_id,
+      admin.username AS owner_admin_username,
+      (
+        SELECT c1.name
+        FROM communities c1
+        WHERE c1.owner_admin_id = admin.id
+          {community_active_clause}
+        ORDER BY c1.is_active DESC, c1.id ASC
+        LIMIT 1
+      ) AS primary_community_name,
+      (
+        SELECT COUNT(*)
+        FROM communities c2
+        WHERE c2.owner_admin_id = admin.id
+          {community_active_clause_2}
+      ) AS community_count
+    FROM users admin
+    WHERE admin.role = 'admin'
+      AND COALESCE(admin.is_master, 0) = 0
+      {admin_active_clause}
+    """
+    sql = sql.format(
+        community_active_clause="" if include_inactive else "AND c1.is_active = 1",
+        community_active_clause_2="" if include_inactive else "AND c2.is_active = 1",
+        admin_active_clause="" if include_inactive else "AND admin.is_active = 1",
+    )
+
+    params = []
+    if user and not is_master_user(user):
+        owner_ids = get_user_scope_owner_ids(user)
+        clause, clause_params = build_in_clause("admin.id", owner_ids)
+        sql += f" AND {clause}"
+        params.extend(clause_params)
+    sql += " ORDER BY admin.username COLLATE NOCASE ASC"
+
+    rows = db.execute(sql, params).fetchall()
+    options = []
+    for row in rows:
+        community_name = row["primary_community_name"]
+        community_count = int(row["community_count"] or 0)
+        if not community_name and not include_without_community:
+            continue
+
+        if community_name:
+            label = f"{community_name} - {row['owner_admin_username']}"
+            if community_count > 1:
+                label = f"{label} (+{community_count - 1})"
+        else:
+            label = f"Sem comunidade - {row['owner_admin_username']}"
+
+        options.append(
+            {
+                "owner_admin_id": row["owner_admin_id"],
+                "owner_admin_username": row["owner_admin_username"],
+                "community_name": community_name,
+                "community_count": community_count,
+                "label": label,
+            }
+        )
+    return options
+
+
+def build_owner_scope_label_map(user=None, include_inactive=False):
+    options = fetch_owner_scope_options(user=user, include_inactive=include_inactive, include_without_community=True)
+    return {row["owner_admin_id"]: row["label"] for row in options}
+
+
+def get_header_label_for_user(user):
+    if not user:
+        return "Sistema de Comissionamento"
+    if is_master_user(user):
+        return "God Mode"
+
+    options = fetch_owner_scope_options(user=user, include_inactive=False, include_without_community=False)
+    if options and options[0]["community_name"]:
+        return options[0]["community_name"]
+    return "Comunidade"
 
 
 def parse_filters(args, user):
@@ -2200,6 +2308,39 @@ def month_to_label(month_key):
         return f"{names[parsed.month - 1]}/{parsed.year}"
     except ValueError:
         return month_key
+
+
+def expand_monthly_rows(monthly_rows):
+    if not monthly_rows:
+        return []
+
+    row_map = {row["month_key"]: row for row in monthly_rows}
+    start = datetime.strptime(monthly_rows[0]["month_key"] + "-01", "%Y-%m-%d").date()
+    end = datetime.strptime(monthly_rows[-1]["month_key"] + "-01", "%Y-%m-%d").date()
+
+    current = start
+    expanded = []
+    while current <= end:
+        key = current.strftime("%Y-%m")
+        original = row_map.get(key)
+        if original:
+            expanded.append(original)
+        else:
+            expanded.append(
+                {
+                    "month_key": key,
+                    "total_value": 0.0,
+                    "total_commission": 0.0,
+                    "confirmed_commission": 0.0,
+                    "pending_or_overdue_commission": 0.0,
+                    "canceled_commission": 0.0,
+                }
+            )
+        if current.month == 12:
+            current = date(current.year + 1, 1, 1)
+        else:
+            current = date(current.year, current.month + 1, 1)
+    return expanded
 
 
 def valid_internal_return(path):
@@ -2723,12 +2864,7 @@ def request_access():
 @login_required
 def update_header_label():
     validate_csrf()
-    user = current_user()
-    next_label = clean_text(request.form.get("header_label"), 80)
-    db = get_db()
-    db.execute("UPDATE users SET header_label = ? WHERE id = ?", (next_label or None, user["id"]))
-    db.commit()
-    flash("Cabeçalho pessoal atualizado.", "success")
+    flash("O título do cabeçalho agora é automático por comunidade. Para mestre, fica 'God Mode'.", "info")
     return redirect(url_for("dashboard"))
 
 
@@ -2793,7 +2929,7 @@ def dashboard_comissionamento():
 
     companies = fetch_companies(user=user, include_inactive=False)
     courses = fetch_courses(user=user, include_inactive=False, seller_permission=None)
-    community_admins = fetch_community_admins(user=user, include_inactive=False, include_masters=False)
+    community_scope_options = fetch_owner_scope_options(user=user, include_inactive=False, include_without_community=False)
 
     selected_seller = None
     if filters["seller_id"]:
@@ -2806,6 +2942,15 @@ def dashboard_comissionamento():
             (filters["seller_id"],),
         ).fetchone()
 
+    export_query = {}
+    for key in ("sale_date_start", "sale_date_end", "seller_id", "owner_admin_id", "company_id", "course_id"):
+        value = filters.get(key)
+        if value is not None and value != "":
+            export_query[key] = value
+    export_url = url_for("export_commission_xlsx", **export_query)
+
+    monthly_rows_full = expand_monthly_rows(data["monthly_rows"])
+
     return render_template(
         "comissionamento.html",
         filters=filters,
@@ -2813,19 +2958,73 @@ def dashboard_comissionamento():
         sellers=sellers,
         companies=companies,
         courses=courses,
-        community_admins=community_admins,
+        community_scope_options=community_scope_options,
         selected_seller=selected_seller,
+        export_url=export_url,
         summary=data["summary"],
         sales_rows=data["sales_rows"],
         rankings_courses=data["rankings_courses"],
         rankings_companies=data["rankings_companies"],
         rankings_sellers=data["rankings_sellers"],
         monthly_rows=data["monthly_rows"],
+        monthly_rows_full=monthly_rows_full,
         best_course_by_sales=data["best_course_by_sales"],
         best_course_by_ticket=data["best_course_by_ticket"],
         favorite_company=data["favorite_company"],
         current_seller_rank=data["current_seller_rank"],
         commission_charts=data["charts"],
+    )
+
+
+@app.get("/community/users")
+@login_required
+def community_users():
+    actor = current_user()
+    if actor["role"] not in ("admin", "seller"):
+        abort(403)
+
+    db = get_db()
+    actor_is_master = is_master_user(actor)
+    owner_ids = set(get_user_scope_owner_ids(actor))
+
+    sql = """
+    SELECT
+      u.id,
+      u.full_name,
+      u.username,
+      u.role,
+      COALESCE(u.is_master, 0) AS is_master,
+      COALESCE(u.is_manager, 0) AS is_manager,
+      COALESCE(u.is_active, 0) AS is_active,
+      u.owner_admin_id,
+      owner.username AS owner_admin_username,
+      owner.full_name AS owner_admin_full_name,
+      (
+        SELECT c1.name
+        FROM communities c1
+        WHERE c1.owner_admin_id = u.owner_admin_id
+        ORDER BY c1.is_active DESC, c1.id ASC
+        LIMIT 1
+      ) AS community_name
+    FROM users u
+    LEFT JOIN users owner ON owner.id = u.owner_admin_id
+    """
+    params = []
+    if not actor_is_master:
+        scope_clause, scope_params = build_in_clause(
+            "COALESCE(NULLIF(u.owner_admin_id, 0), CASE WHEN u.role = 'admin' AND COALESCE(u.is_master, 0) = 0 THEN u.id END)",
+            owner_ids,
+        )
+        sql += f" WHERE {scope_clause}"
+        params.extend(scope_params)
+    sql += " ORDER BY u.role ASC, u.username COLLATE NOCASE ASC"
+    users_rows = db.execute(sql, params).fetchall()
+
+    community_scope_labels = build_owner_scope_label_map(user=actor, include_inactive=True)
+    return render_template(
+        "community_users.html",
+        users=users_rows,
+        community_scope_labels=community_scope_labels,
     )
 
 
@@ -3519,7 +3718,7 @@ def manage_users():
             request_note = None
             if owner_admin_id is None:
                 request_note = "Comunidade pendente de definição no momento da aprovação."
-            if not actor_is_master and owner_admin_id not in actor_owner_ids:
+            if not actor_is_master and owner_admin_id is not None and owner_admin_id not in actor_owner_ids:
                 flash("Você só pode criar solicitações para a sua comunidade.", "error")
                 return redirect(url_for("manage_users"))
 
@@ -3751,6 +3950,53 @@ def manage_users():
 
             db.commit()
             flash("Alterações do usuário salvas.", "success")
+            return redirect(url_for("manage_users"))
+
+        if action == "delete_user":
+            if not actor_is_master:
+                flash("Somente o Administrador Mestre pode excluir usuários.", "error")
+                return redirect(url_for("manage_users"))
+            try:
+                user_id = parse_int(request.form.get("user_id"), "Usuário")
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("manage_users"))
+
+            target = db.execute(
+                "SELECT id, username, role, is_master, is_active FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            if not target:
+                flash("Usuário não encontrado.", "error")
+                return redirect(url_for("manage_users"))
+            if target["id"] == actor["id"]:
+                flash("Não é possível excluir o próprio usuário conectado.", "error")
+                return redirect(url_for("manage_users"))
+            if target["role"] == "admin" and target["is_active"]:
+                active_admins = db.execute(
+                    "SELECT COUNT(*) AS total FROM users WHERE role = 'admin' AND is_active = 1"
+                ).fetchone()["total"]
+                if active_admins <= 1:
+                    flash("Não é possível excluir o último admin ativo.", "error")
+                    return redirect(url_for("manage_users"))
+            if target["is_master"] and target["is_active"]:
+                active_masters = db.execute(
+                    """
+                    SELECT COUNT(*) AS total
+                    FROM users
+                    WHERE role = 'admin' AND COALESCE(is_master, 0) = 1 AND is_active = 1
+                    """
+                ).fetchone()["total"]
+                if active_masters <= 1:
+                    flash("Não é possível excluir o último mestre ativo.", "error")
+                    return redirect(url_for("manage_users"))
+            try:
+                db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+                db.commit()
+                flash(f"Usuário '{target['username']}' excluído.", "success")
+            except sqlite3.IntegrityError:
+                db.rollback()
+                flash("Não foi possível excluir: este usuário possui vínculos obrigatórios (ex.: vendas).", "error")
             return redirect(url_for("manage_users"))
 
         if action == "update_hierarchy":
@@ -4172,6 +4418,12 @@ def manage_users():
     users_sql += " ORDER BY u.created_at DESC"
     users = db.execute(users_sql, params).fetchall()
     community_admins = fetch_community_admins(user=actor, include_inactive=True)
+    community_scope_options = fetch_owner_scope_options(
+        user=actor,
+        include_inactive=True,
+        include_without_community=actor_is_master,
+    )
+    community_scope_labels = build_owner_scope_label_map(user=actor, include_inactive=True)
     membership_target_users = []
     user_memberships = []
     if actor_is_master:
@@ -4261,6 +4513,8 @@ def manage_users():
         actor_is_master=actor_is_master,
         can_export_credentials=actor_is_master,
         community_admins=community_admins,
+        community_scope_options=community_scope_options,
+        community_scope_labels=community_scope_labels,
         membership_target_users=membership_target_users,
         user_memberships=user_memberships,
         can_manage_seller_permissions=can_manage_seller_permissions,
@@ -4498,11 +4752,17 @@ def user_access_requests():
         params.append(actor["username"])
     sql += " ORDER BY CASE r.status WHEN 'pendente' THEN 0 WHEN 'aprovado' THEN 1 ELSE 2 END, r.requested_at DESC"
     requests_rows = db.execute(sql, params).fetchall()
-    community_admins = fetch_community_admins(user=actor, include_inactive=False, include_masters=False)
+    community_scope_options = fetch_owner_scope_options(
+        user=actor,
+        include_inactive=False,
+        include_without_community=False,
+    )
+    community_scope_labels = build_owner_scope_label_map(user=actor, include_inactive=True)
     return render_template(
         "user_access_requests.html",
         requests=requests_rows,
-        community_admins=community_admins,
+        community_scope_options=community_scope_options,
+        community_scope_labels=community_scope_labels,
         actor_is_master=actor_is_master,
     )
 
@@ -4539,6 +4799,19 @@ def manage_communities():
     if not is_master_user(actor):
         abort(403)
     db = get_db()
+
+    def upsert_membership(user_id, owner_admin_id):
+        if not user_id or not owner_admin_id:
+            return
+        db.execute(
+            """
+            INSERT INTO user_community_memberships (user_id, owner_admin_id, is_active, created_at, updated_at)
+            VALUES (?, ?, 1, ?, ?)
+            ON CONFLICT(user_id, owner_admin_id)
+            DO UPDATE SET is_active = 1, updated_at = excluded.updated_at
+            """,
+            (user_id, owner_admin_id, now_iso(), now_iso()),
+        )
 
     if request.method == "POST":
         validate_csrf()
@@ -4584,15 +4857,7 @@ def manage_communities():
                 (name, owner_admin_id, None, now, now),
             )
             if owner_admin_id is not None:
-                db.execute(
-                    """
-                    INSERT INTO user_community_memberships (user_id, owner_admin_id, is_active, created_at, updated_at)
-                    VALUES (?, ?, 1, ?, ?)
-                    ON CONFLICT(user_id, owner_admin_id)
-                    DO UPDATE SET is_active = 1, updated_at = excluded.updated_at
-                    """,
-                    (owner_admin_id, owner_admin_id, now, now),
-                )
+                upsert_membership(owner_admin_id, owner_admin_id)
             db.commit()
             flash("Comunidade criada.", "success")
             return redirect(url_for("manage_communities"))
@@ -4675,15 +4940,7 @@ def manage_communities():
                 (name, owner_admin_id, manager_user_id, desired_active, now_iso(), community_id),
             )
             if owner_admin_id is not None:
-                db.execute(
-                    """
-                    INSERT INTO user_community_memberships (user_id, owner_admin_id, is_active, created_at, updated_at)
-                    VALUES (?, ?, 1, ?, ?)
-                    ON CONFLICT(user_id, owner_admin_id)
-                    DO UPDATE SET is_active = 1, updated_at = excluded.updated_at
-                    """,
-                    (owner_admin_id, owner_admin_id, now_iso(), now_iso()),
-                )
+                upsert_membership(owner_admin_id, owner_admin_id)
             db.commit()
             flash("Alterações da comunidade salvas.", "success")
             return redirect(url_for("manage_communities"))
@@ -4759,8 +5016,78 @@ def manage_communities():
                 """,
                 (name, owner_admin_id, manager_user_id, now_iso(), community_id),
             )
+            if owner_admin_id is not None:
+                upsert_membership(owner_admin_id, owner_admin_id)
             db.commit()
             flash("Comunidade atualizada.", "success")
+            return redirect(url_for("manage_communities"))
+
+        if action == "add_admin":
+            try:
+                community_id = parse_int(request.form.get("community_id"), "Comunidade")
+                admin_user_id = parse_int(request.form.get("admin_user_id"), "Administrador")
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("manage_communities"))
+            community = db.execute(
+                "SELECT id, owner_admin_id, name FROM communities WHERE id = ?",
+                (community_id,),
+            ).fetchone()
+            if not community:
+                flash("Comunidade não encontrada.", "error")
+                return redirect(url_for("manage_communities"))
+            if not community["owner_admin_id"]:
+                flash("Defina primeiro um admin principal para a comunidade.", "error")
+                return redirect(url_for("manage_communities"))
+            admin_user = db.execute(
+                """
+                SELECT id
+                FROM users
+                WHERE id = ?
+                  AND role = 'admin'
+                  AND COALESCE(is_master, 0) = 0
+                  AND is_active = 1
+                """,
+                (admin_user_id,),
+            ).fetchone()
+            if not admin_user:
+                flash("Administrador adicional inválido.", "error")
+                return redirect(url_for("manage_communities"))
+            if admin_user_id == community["owner_admin_id"]:
+                flash("Este usuário já é o admin principal da comunidade.", "error")
+                return redirect(url_for("manage_communities"))
+            upsert_membership(admin_user_id, community["owner_admin_id"])
+            db.commit()
+            flash("Administrador adicional vinculado à comunidade.", "success")
+            return redirect(url_for("manage_communities"))
+
+        if action == "remove_admin":
+            try:
+                community_id = parse_int(request.form.get("community_id"), "Comunidade")
+                admin_user_id = parse_int(request.form.get("admin_user_id"), "Administrador")
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("manage_communities"))
+            community = db.execute(
+                "SELECT id, owner_admin_id FROM communities WHERE id = ?",
+                (community_id,),
+            ).fetchone()
+            if not community:
+                flash("Comunidade não encontrada.", "error")
+                return redirect(url_for("manage_communities"))
+            if admin_user_id == community["owner_admin_id"]:
+                flash("Não é possível remover o admin principal por esta ação.", "error")
+                return redirect(url_for("manage_communities"))
+            db.execute(
+                """
+                UPDATE user_community_memberships
+                SET is_active = 0, updated_at = ?
+                WHERE user_id = ? AND owner_admin_id = ?
+                """,
+                (now_iso(), admin_user_id, community["owner_admin_id"]),
+            )
+            db.commit()
+            flash("Administrador adicional removido da comunidade.", "success")
             return redirect(url_for("manage_communities"))
 
         if action == "toggle_active":
@@ -4781,8 +5108,53 @@ def manage_communities():
             flash("Status da comunidade atualizado.", "success")
             return redirect(url_for("manage_communities"))
 
+        if action == "delete":
+            try:
+                community_id = parse_int(request.form.get("community_id"), "Comunidade")
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("manage_communities"))
+            community = db.execute(
+                "SELECT id, name FROM communities WHERE id = ?",
+                (community_id,),
+            ).fetchone()
+            if not community:
+                flash("Comunidade não encontrada.", "error")
+                return redirect(url_for("manage_communities"))
+            try:
+                db.execute("DELETE FROM communities WHERE id = ?", (community_id,))
+                db.commit()
+                flash(f"Comunidade '{community['name']}' excluída.", "success")
+            except sqlite3.IntegrityError:
+                db.rollback()
+                flash("Não foi possível excluir a comunidade por possuir vínculos ativos.", "error")
+            return redirect(url_for("manage_communities"))
+
     communities = fetch_communities(user=actor, include_inactive=True)
     community_admins = fetch_community_admins(user=actor, include_inactive=False, include_masters=False)
+    additional_admin_rows = db.execute(
+        """
+        SELECT
+          m.owner_admin_id,
+          u.id AS admin_id,
+          u.username AS admin_username
+        FROM user_community_memberships m
+        INNER JOIN users u ON u.id = m.user_id
+        WHERE m.is_active = 1
+          AND u.role = 'admin'
+          AND COALESCE(u.is_master, 0) = 0
+          AND u.id <> m.owner_admin_id
+        ORDER BY u.username COLLATE NOCASE ASC
+        """
+    ).fetchall()
+    additional_admins_by_owner = {}
+    for row in additional_admin_rows:
+        additional_admins_by_owner.setdefault(row["owner_admin_id"], []).append(
+            {
+                "admin_id": row["admin_id"],
+                "admin_username": row["admin_username"],
+            }
+        )
     managers = db.execute(
         """
         SELECT id, full_name, username, owner_admin_id
@@ -4795,6 +5167,7 @@ def manage_communities():
         "communities.html",
         communities=communities,
         community_admins=community_admins,
+        additional_admins_by_owner=additional_admins_by_owner,
         managers=managers,
     )
 
@@ -4809,6 +5182,13 @@ def manage_companies():
     actor_is_master = is_master_user(actor)
     actor_owner_admin_id = get_owner_admin_id_for_user(actor)
     actor_owner_ids = set(get_user_scope_owner_ids(actor))
+    owner_scope_options = fetch_owner_scope_options(
+        user=actor,
+        include_inactive=False,
+        include_without_community=False,
+    )
+    allowed_owner_ids = {opt["owner_admin_id"] for opt in owner_scope_options}
+    allowed_owner_ids.update(actor_owner_ids)
 
     if request.method == "POST":
         validate_csrf()
@@ -4820,31 +5200,20 @@ def manage_companies():
                 flash("Nome da empresa inválido.", "error")
                 return redirect(url_for("manage_companies"))
             owner_admin_id = actor_owner_admin_id
-            if not actor_is_master:
-                try:
-                    selected_owner = parse_int(
-                        request.form.get("owner_admin_id"),
-                        "Comunidade",
-                        allow_empty=True,
-                    )
-                except ValueError as exc:
-                    flash(str(exc), "error")
-                    return redirect(url_for("manage_companies"))
-                if selected_owner is not None:
-                    owner_admin_id = selected_owner
-                if owner_admin_id not in actor_owner_ids:
-                    flash("Comunidade inválida para criação da empresa.", "error")
-                    return redirect(url_for("manage_companies"))
+            try:
+                selected_owner = parse_int(
+                    request.form.get("owner_admin_id"),
+                    "Comunidade",
+                    allow_empty=True,
+                )
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("manage_companies"))
+
+            if selected_owner is not None:
+                owner_admin_id = selected_owner
+
             if actor_is_master:
-                try:
-                    owner_admin_id = parse_int(
-                        request.form.get("owner_admin_id"),
-                        "Comunidade",
-                        allow_empty=True,
-                    )
-                except ValueError as exc:
-                    flash(str(exc), "error")
-                    return redirect(url_for("manage_companies"))
                 if owner_admin_id is None:
                     flash("Selecione a comunidade dona da empresa.", "error")
                     return redirect(url_for("manage_companies"))
@@ -4855,11 +5224,16 @@ def manage_companies():
                     WHERE id = ?
                       AND role = 'admin'
                       AND COALESCE(is_master, 0) = 0
+                      AND is_active = 1
                     """,
                     (owner_admin_id,),
                 ).fetchone()
                 if not owner_row:
                     flash("Comunidade inválida.", "error")
+                    return redirect(url_for("manage_companies"))
+            else:
+                if owner_admin_id not in allowed_owner_ids:
+                    flash("Comunidade inválida para criação da empresa.", "error")
                     return redirect(url_for("manage_companies"))
             exists = db.execute("SELECT id FROM companies WHERE lower(name) = lower(?)", (name,)).fetchone()
             if exists:
@@ -4898,7 +5272,46 @@ def manage_companies():
             if duplicate:
                 flash("Já existe outra empresa com este nome.", "error")
                 return redirect(url_for("manage_companies"))
-            db.execute("UPDATE companies SET name = ?, updated_at = ? WHERE id = ?", (name, now_iso(), company_id))
+            next_owner_admin_id = target["owner_admin_id"]
+            try:
+                selected_owner = parse_int(
+                    request.form.get("owner_admin_id"),
+                    "Comunidade",
+                    allow_empty=True,
+                )
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("manage_companies"))
+
+            if selected_owner is not None:
+                next_owner_admin_id = selected_owner
+
+            if actor_is_master:
+                if next_owner_admin_id is None:
+                    flash("Selecione a comunidade dona da empresa.", "error")
+                    return redirect(url_for("manage_companies"))
+                owner_row = db.execute(
+                    """
+                    SELECT id
+                    FROM users
+                    WHERE id = ?
+                      AND role = 'admin'
+                      AND COALESCE(is_master, 0) = 0
+                      AND is_active = 1
+                    """,
+                    (next_owner_admin_id,),
+                ).fetchone()
+                if not owner_row:
+                    flash("Comunidade inválida.", "error")
+                    return redirect(url_for("manage_companies"))
+            elif next_owner_admin_id not in allowed_owner_ids:
+                flash("Comunidade inválida para edição da empresa.", "error")
+                return redirect(url_for("manage_companies"))
+
+            db.execute(
+                "UPDATE companies SET name = ?, owner_admin_id = ?, updated_at = ? WHERE id = ?",
+                (name, next_owner_admin_id, now_iso(), company_id),
+            )
             db.commit()
             flash("Empresa atualizada.", "success")
             return redirect(url_for("manage_companies"))
@@ -4921,14 +5334,37 @@ def manage_companies():
             flash("Status da empresa atualizado.", "success")
             return redirect(url_for("manage_companies"))
 
+        if action == "delete":
+            if not actor_is_master:
+                flash("Somente o Administrador Mestre pode excluir empresas.", "error")
+                return redirect(url_for("manage_companies"))
+            try:
+                company_id = parse_int(request.form.get("company_id"), "Empresa")
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("manage_companies"))
+            row = db.execute("SELECT id, name FROM companies WHERE id = ?", (company_id,)).fetchone()
+            if not row:
+                flash("Empresa não encontrada.", "error")
+                return redirect(url_for("manage_companies"))
+            try:
+                db.execute("DELETE FROM companies WHERE id = ?", (company_id,))
+                db.commit()
+                flash(f"Empresa '{row['name']}' excluída.", "success")
+            except sqlite3.IntegrityError:
+                db.rollback()
+                flash("Não foi possível excluir: existem cursos ou vendas vinculados a esta empresa.", "error")
+            return redirect(url_for("manage_companies"))
+
     companies = fetch_companies(user=actor, include_inactive=True)
-    community_admins = fetch_community_admins(user=actor, include_inactive=False)
-    show_owner_selector = actor_is_master or len(community_admins) > 1
+    owner_scope_labels = build_owner_scope_label_map(user=actor, include_inactive=True)
+    show_owner_selector = actor_is_master or len(owner_scope_options) > 1
     return render_template(
         "companies.html",
         companies=companies,
         actor_is_master=actor_is_master,
-        community_admins=community_admins,
+        owner_scope_options=owner_scope_options,
+        owner_scope_labels=owner_scope_labels,
         show_owner_selector=show_owner_selector,
     )
 
@@ -5091,12 +5527,48 @@ def manage_courses():
             flash("Status do curso atualizado.", "success")
             return redirect(url_for("manage_courses"))
 
+        if action == "delete":
+            if not actor_is_master:
+                flash("Somente o Administrador Mestre pode excluir cursos.", "error")
+                return redirect(url_for("manage_courses"))
+            try:
+                course_id = parse_int(request.form.get("course_id"), "Curso")
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("manage_courses"))
+            row = db.execute(
+                """
+                SELECT c.id, c.name, comp.owner_admin_id
+                FROM courses c
+                INNER JOIN companies comp ON comp.id = c.company_id
+                WHERE c.id = ?
+                """,
+                (course_id,),
+            ).fetchone()
+            if not row:
+                flash("Curso não encontrado.", "error")
+                return redirect(url_for("manage_courses"))
+            try:
+                db.execute("DELETE FROM courses WHERE id = ?", (course_id,))
+                db.commit()
+                flash(f"Curso '{row['name']}' excluído.", "success")
+            except sqlite3.IntegrityError:
+                db.rollback()
+                flash("Não foi possível excluir: existem vendas vinculadas a este curso.", "error")
+            return redirect(url_for("manage_courses"))
+
     companies = fetch_companies(user=actor, include_inactive=False)
     if seller_restricted:
         courses = fetch_courses(user=actor, include_inactive=True, seller_permission="can_edit_course")
     else:
         courses = fetch_courses(user=actor, include_inactive=True)
-    return render_template("courses.html", companies=companies, courses=courses, can_create_course=not seller_restricted)
+    return render_template(
+        "courses.html",
+        companies=companies,
+        courses=courses,
+        can_create_course=not seller_restricted,
+        actor_is_master=actor_is_master,
+    )
 
 
 @app.route("/viewer/course-access", methods=["GET", "POST"])
@@ -5434,6 +5906,122 @@ def export_xlsx():
         buffer,
         as_attachment=True,
         download_name=file_name,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.get("/dashboard/comissionamento/export/xlsx")
+@login_required
+def export_commission_xlsx():
+    if Workbook is None:
+        flash("Instale openpyxl para exportar xlsx: pip install openpyxl", "error")
+        return redirect(url_for("dashboard_comissionamento"))
+
+    user = current_user()
+    filters = parse_commission_filters(request.args, user)
+    data = fetch_commission_dashboard_data(user, filters)
+    if not data["sales_rows"]:
+        flash("Não há dados filtrados para exportar.", "error")
+        return redirect(url_for("dashboard_comissionamento"))
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Resumo"
+    ws.append(["Indicador", "Valor"])
+    ws.append(["Vendas no período", int(data["summary"]["sales_count"] or 0)])
+    ws.append(["Faturamento total", float(data["summary"]["total_revenue"] or 0)])
+    ws.append(["Comissão prevista total", float(data["summary"]["total_commission_expected"] or 0)])
+    ws.append(["Vendas em recorrência", int(data["summary"]["recurring_sales_count"] or 0)])
+    ws.append(["Exportado em", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+
+    ws_month = wb.create_sheet("Comissão Mensal")
+    ws_month.append(
+        [
+            "Mês",
+            "Valor (parcelas)",
+            "Comissão total",
+            "Comissão confirmada",
+            "Comissão pendente/atrasada",
+            "Comissão cancelada",
+        ]
+    )
+    monthly_rows = expand_monthly_rows(data["monthly_rows"])
+    for row in monthly_rows:
+        ws_month.append(
+            [
+                month_to_label(row["month_key"]),
+                float(row["total_value"] or 0),
+                float(row["total_commission"] or 0),
+                float(row["confirmed_commission"] or 0),
+                float(row["pending_or_overdue_commission"] or 0),
+                float(row["canceled_commission"] or 0),
+            ]
+        )
+
+    if BarChart is not None and Reference is not None and len(monthly_rows) > 0:
+        chart = BarChart()
+        chart.title = "Comissão Mensal (Filtrada)"
+        chart.y_axis.title = "R$"
+        chart.x_axis.title = "Mês"
+        data_ref = Reference(ws_month, min_col=3, max_col=4, min_row=1, max_row=len(monthly_rows) + 1)
+        categories_ref = Reference(ws_month, min_col=1, min_row=2, max_row=len(monthly_rows) + 1)
+        chart.add_data(data_ref, titles_from_data=True)
+        chart.set_categories(categories_ref)
+        chart.height = 7
+        chart.width = 15
+        ws_month.add_chart(chart, "H2")
+
+    ws_sales = wb.create_sheet("Vendas Filtradas")
+    ws_sales.append(
+        [
+            "Data",
+            "Cliente",
+            "Empresa",
+            "Curso",
+            "Vendedor (login)",
+            "Pagamento",
+            "Parcelas",
+            "Valor total",
+            "Comissão total",
+        ]
+    )
+    for row in data["sales_rows"]:
+        ws_sales.append(
+            [
+                row["sale_date"],
+                row["customer_name"],
+                row["company_name"],
+                row["course_name"],
+                row["seller_username"],
+                PAYMENT_FORMATS.get(row["payment_format"], row["payment_format"]),
+                int(row["installments_count"] or 0),
+                float(row["total_value"] or 0),
+                float(row["total_commission_expected"] or 0),
+            ]
+        )
+
+    ws_rank = wb.create_sheet("Ranking Vendedores")
+    ws_rank.append(["Posição", "Login", "Vendas", "Faturamento", "Ticket médio", "Comissão total"])
+    for index, row in enumerate(data["rankings_sellers"], start=1):
+        ws_rank.append(
+            [
+                index,
+                row["seller_username"],
+                int(row["sales_count"] or 0),
+                float(row["total_revenue"] or 0),
+                float(row["avg_ticket"] or 0),
+                float(row["total_commission"] or 0),
+            ]
+        )
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    filename = f"comissionamento_filtrado_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 

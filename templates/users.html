@@ -51,8 +51,8 @@
         Comunidade de destino (quando indicação for mestre)
         <select name="preferred_owner_admin_id">
           <option value="">Padrão (primeira comunidade ativa)</option>
-          {% for admin in community_admins %}
-          <option value="{{ admin.id }}">{{ admin.username }} - {{ admin.full_name }}</option>
+          {% for option in community_scope_options %}
+          <option value="{{ option.owner_admin_id }}">{{ option.label }}</option>
           {% endfor %}
         </select>
       </label>
@@ -89,8 +89,8 @@
         Comunidade (admin responsável)
         <select name="owner_admin_id" required>
           <option value="">Selecione</option>
-          {% for admin in community_admins %}
-          <option value="{{ admin.id }}">{{ admin.full_name }}</option>
+          {% for option in community_scope_options %}
+          <option value="{{ option.owner_admin_id }}">{{ option.label }}</option>
           {% endfor %}
         </select>
       </label>
@@ -139,13 +139,7 @@
             {% endif %}
             <td>{{ user.invited_by_username or '-' }}</td>
             <td>
-              {% if user.owner_admin_name %}
-                {{ user.owner_admin_username }} - {{ user.owner_admin_name }}
-              {% elif user.role == 'admin' and not user.is_master %}
-                Própria
-              {% else %}
-                -
-              {% endif %}
+              {{ community_scope_labels.get(user.owner_admin_id, '-') if user.owner_admin_id else '-' }}
             </td>
             <td>{{ 'Ativo' if user.is_active else 'Inativo' }}</td>
             <td>
@@ -164,8 +158,8 @@
                 </select>
                 <select name="community_admin_id">
                   <option value="">Sem comunidade</option>
-                  {% for admin in community_admins %}
-                  <option value="{{ admin.id }}" {% if user.owner_admin_id == admin.id %}selected{% endif %}>{{ admin.username }} - {{ admin.full_name }}</option>
+                  {% for option in community_scope_options %}
+                  <option value="{{ option.owner_admin_id }}" {% if user.owner_admin_id == option.owner_admin_id %}selected{% endif %}>{{ option.label }}</option>
                   {% endfor %}
                 </select>
                 {% endif %}
@@ -176,6 +170,14 @@
                 <input type="password" name="new_password" minlength="3" maxlength="8" placeholder="•••••••• (nova senha)">
                 <button class="mini-btn" type="submit">Salvar alterações</button>
               </form>
+              {% if actor_is_master %}
+              <form method="post" class="inline-form" onsubmit="return confirm('Tem certeza que deseja excluir este usuário?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="delete_user">
+                <input type="hidden" name="user_id" value="{{ user.id }}">
+                <button class="mini-btn delete" type="submit">Excluir</button>
+              </form>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}

@@ -17,8 +17,8 @@
         Comunidade
         <select name="owner_admin_id" required>
           <option value="">Selecione</option>
-          {% for admin in community_admins %}
-          <option value="{{ admin.id }}">{{ admin.full_name }}</option>
+          {% for option in owner_scope_options %}
+          <option value="{{ option.owner_admin_id }}">{{ option.label }}</option>
           {% endfor %}
         </select>
       </label>
@@ -36,7 +36,7 @@
           {% for company in companies %}
           <tr>
             <td>{{ company.name }}</td>
-            <td>{{ company.owner_admin_name or '-' }}</td>
+            <td>{{ owner_scope_labels.get(company.owner_admin_id, '-') if company.owner_admin_id else '-' }}</td>
             <td>{{ 'Ativa' if company.is_active else 'Inativa' }}</td>
             <td>
               <div class="row-actions">
@@ -45,6 +45,13 @@
                   <input type="hidden" name="action" value="update">
                   <input type="hidden" name="company_id" value="{{ company.id }}">
                   <input type="text" name="name" value="{{ company.name }}" required>
+                  {% if show_owner_selector %}
+                  <select name="owner_admin_id">
+                    {% for option in owner_scope_options %}
+                    <option value="{{ option.owner_admin_id }}" {% if company.owner_admin_id == option.owner_admin_id %}selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                  {% endif %}
                   <button class="mini-btn" type="submit">Renomear</button>
                 </form>
                 <form method="post" class="inline-form">
@@ -53,6 +60,14 @@
                   <input type="hidden" name="company_id" value="{{ company.id }}">
                   <button class="mini-btn" type="submit">{{ 'Desativar' if company.is_active else 'Ativar' }}</button>
                 </form>
+                {% if actor_is_master %}
+                <form method="post" class="inline-form" onsubmit="return confirm('Tem certeza que deseja excluir esta empresa?');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="company_id" value="{{ company.id }}">
+                  <button class="mini-btn delete" type="submit">Excluir</button>
+                </form>
+                {% endif %}
               </div>
             </td>
           </tr>

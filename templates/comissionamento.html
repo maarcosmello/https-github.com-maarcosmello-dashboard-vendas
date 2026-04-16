@@ -22,9 +22,9 @@
         Comunidade
         <select name="owner_admin_id">
           <option value="">Todas</option>
-          {% for admin in community_admins %}
-          <option value="{{ admin.id }}" {% if filters.owner_admin_id == admin.id %}selected{% endif %}>
-            {{ admin.username }} - {{ admin.full_name }}
+          {% for option in community_scope_options %}
+          <option value="{{ option.owner_admin_id }}" {% if filters.owner_admin_id == option.owner_admin_id %}selected{% endif %}>
+            {{ option.label }}
           </option>
           {% endfor %}
         </select>
@@ -63,6 +63,7 @@
       <div class="actions full">
         <button class="btn btn-primary" type="submit">Aplicar filtros</button>
         <a class="btn btn-secondary" href="{{ url_for('dashboard_comissionamento') }}">Limpar</a>
+        <a class="btn btn-secondary" href="{{ export_url }}">Exportar Excel filtrado</a>
       </div>
     </form>
     {% if selected_seller %}
@@ -175,6 +176,41 @@
             {% endfor %}
           {% else %}
             <tr><td colspan="6" class="muted">Sem comissionamento para o período selecionado.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="panel full-span">
+    <div class="section-title-row">
+      <h2>Linha mensal completa</h2>
+      <span class="section-badge">Todos os meses no período</span>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Mês</th>
+            <th>Comissão total</th>
+            <th>Comissão confirmada</th>
+            <th>Pendente/Atrasada</th>
+            <th>Cancelada</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if monthly_rows_full %}
+            {% for row in monthly_rows_full %}
+            <tr>
+              <td>{{ row.month_key|month_br }}</td>
+              <td>{{ row.total_commission|currency }}</td>
+              <td>{{ row.confirmed_commission|currency }}</td>
+              <td>{{ row.pending_or_overdue_commission|currency }}</td>
+              <td>{{ row.canceled_commission|currency }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="5" class="muted">Sem dados mensais para exibir.</td></tr>
           {% endif %}
         </tbody>
       </table>

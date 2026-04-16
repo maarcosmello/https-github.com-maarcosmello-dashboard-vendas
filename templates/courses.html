@@ -67,6 +67,14 @@
                   <input type="hidden" name="course_id" value="{{ course.id }}">
                   <button class="mini-btn" type="submit">{{ 'Desativar' if course.is_active else 'Ativar' }}</button>
                 </form>
+                {% if actor_is_master %}
+                <form method="post" class="inline-form" onsubmit="return confirm('Tem certeza que deseja excluir este curso?');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="course_id" value="{{ course.id }}">
+                  <button class="mini-btn delete" type="submit">Excluir</button>
+                </form>
+                {% endif %}
               </div>
             </td>
           </tr>
